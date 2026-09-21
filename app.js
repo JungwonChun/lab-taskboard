@@ -72,7 +72,7 @@ document.addEventListener('change', async (e) => {
   const el = e.target.closest('select[data-action], input[data-action]');
   if (!el) return;
   const fn = changes[el.dataset.action];
-  if (fn) { try { await fn(el); } catch (err) { toast(err.message, 'error'); } }
+  if (fn) { try { await fn(el); } catch (err) { toast(err.message, 'error'); await refresh(); render(); } }
 });
 document.addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-form]');
@@ -89,7 +89,15 @@ document.getElementById('modal-root').addEventListener('click', (e) => {
 });
 
 let unsubscribe = null;
+let bootstrapped = false;
 async function onSession(session) {
+  const sameUser = (session?.user?.id ?? null) === (state.session?.user?.id ?? null);
+  if (bootstrapped && sameUser && (session === null || state.me)) {
+    // TOKEN_REFRESHED / repeated INITIAL_SESSION for the same user: nothing to reload.
+    state.session = session;
+    return;
+  }
+  bootstrapped = true;
   state.session = session;
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (session) {
@@ -103,5 +111,4 @@ async function onSession(session) {
 }
 
 api.onAuthChange(onSession);
-onSession(await api.getSession());
 export { api, refresh };
