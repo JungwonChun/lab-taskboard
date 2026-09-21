@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '',
+  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '', legacyName: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -63,7 +63,7 @@ export function renderMain() {
 
 export function render() {
   if (!state.session || !state.me) {
-    root.innerHTML = renderAuth('login', state.authError);
+    root.innerHTML = renderAuth('login', state.authError, state.legacyName);
     return;
   }
   root.innerHTML = renderShell(state, renderMain());
@@ -107,6 +107,7 @@ document.getElementById('modal-root').addEventListener('focusout', () => {
 // ── event wiring (delegated) ──
 export const actions = {
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
+  'auth-cancel-migrate': () => { state.legacyName = ''; state.authError = ''; renderAll(); },
   'logout': async () => { await api.signOut(); },
   'new-job': () => { state.modal = null; openModal(renderJobForm(state)); },
   // While editing (state.editingJobId set), 닫기/✕ should return to the
@@ -185,6 +186,27 @@ export const changes = {
 };
 export const forms = {
   // 이름만 받는다: 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
+  // 예전 비밀번호로 한 번 들어간 뒤, 이름에서 만든 비밀번호로 바꿔 끼운다.
+  'migrate': async (form) => {
+    const name = state.legacyName;
+    const oldPw = String(new FormData(form).get('password') || '');
+    try {
+      await api.signIn(name, oldPw);
+    } catch {
+      state.authError = '예전 비밀번호가 맞지 않습니다';
+      renderAll();
+      return;
+    }
+    try {
+      await api.updatePassword(nameToPassword(name));
+      state.legacyName = '';
+      state.authError = '';
+      toast('이제부터 이름만으로 들어갑니다');
+    } catch (e) {
+      state.authError = translateAuthError(e.message);
+      renderAll();
+    }
+  },
   'auth': async (form) => {
     const v = validateName(new FormData(form).get('name'));
     if (!v.ok) { state.authError = v.error; renderAll(); return; }
@@ -194,7 +216,19 @@ export const forms = {
         await api.signIn(v.name, pw);
       } catch (signInErr) {
         if (!/틀렸습니다|Invalid login credentials/i.test(signInErr.message)) throw signInErr;
-        const data = await api.signUp(v.name, pw);
+        let data;
+        try {
+          data = await api.signUp(v.name, pw);
+        } catch (signUpErr) {
+          // 이름은 이미 쓰이는데 파생 비밀번호로는 못 들어간다 = 예전 비밀번호로 만든 계정.
+          if (/이미 있는 이름|already registered|already exists/i.test(signUpErr.message)) {
+            state.legacyName = v.name;
+            state.authError = '';
+            renderAll();
+            return;
+          }
+          throw signUpErr;
+        }
         if (!data.session) {
           state.authError = '이메일 확인이 켜져 있어 가입이 완료되지 않았습니다. Supabase → Authentication → Providers → Email에서 Confirm email을 끄세요.';
           renderAll();
@@ -202,6 +236,7 @@ export const forms = {
         }
       }
       state.authError = '';
+      state.legacyName = '';
     } catch (e) {
       state.authError = translateAuthError(e.message);
       renderAll();

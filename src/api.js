@@ -37,6 +37,10 @@ export function createApi(client) {
       return must(await client.auth.signInWithPassword({ email: nameToEmail(name), password }), '로그인');
     },
     async signOut() { await client.auth.signOut(); },
+    // 예전(비밀번호 방식) 계정을 이름만 방식으로 옮길 때 쓴다.
+    async updatePassword(password) {
+      return must(await client.auth.updateUser({ password }), '비밀번호 변경');
+    },
     async getSession() { return (await client.auth.getSession()).data.session; },
     // Deferred with setTimeout(0), not queueMicrotask: this callback fires
     // while supabase-js still holds its internal auth lock during session

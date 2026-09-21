@@ -4,7 +4,24 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export function renderAuth(_mode = 'login', error = '') {
+export function renderAuth(_mode = 'login', error = '', legacyName = '') {
+  // legacyName 이 있으면, 예전 비밀번호 방식으로 만들어진 계정이라 한 번만 옛 비밀번호를 받는다.
+  if (legacyName) {
+    return `
+  <div class="auth">
+    <h1>Lab Taskboard</h1>
+    <p class="hint"><b>${esc(legacyName)}</b> 계정은 예전 비밀번호 방식으로 만들어졌습니다.
+    그때 쓰던 비밀번호를 한 번만 넣어주세요. 이후로는 이름만으로 들어갑니다.</p>
+    <form data-form="migrate">
+      <label>${esc(legacyName)} 의 예전 비밀번호</label>
+      <input name="password" type="password" required minlength="6" autofocus>
+      <div class="error">${esc(error)}</div>
+      <button class="primary" style="width:100%;margin-top:8px">바꾸고 들어가기</button>
+    </form>
+    <p class="hint" style="margin-top:12px">비밀번호가 기억나지 않으면 관리자가 Supabase → Authentication → Users 에서 그 계정을 지우면 됩니다. 지운 뒤 같은 이름으로 다시 들어오면 새로 만들어집니다.</p>
+    <button data-action="auth-cancel-migrate" style="width:100%;margin-top:8px">다른 이름으로 들어가기</button>
+  </div>`;
+  }
   return `
   <div class="auth">
     <h1>Lab Taskboard</h1>
