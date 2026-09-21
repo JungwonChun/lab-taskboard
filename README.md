@@ -1,0 +1,66 @@
+# Lab Taskboard
+
+연구실 구성원끼리 일을 의뢰하고 담당자별 큐로 진행 상황·결과 파일을 공유하는 보드.
+서버 없음: Supabase(무료) + GitHub Pages(무료).
+
+## 1. Supabase 프로젝트 만들기 (5분)
+1. https://supabase.com → New project (리전 Northeast Asia (Seoul)). DB 비밀번호는 보관.
+2. **Authentication → Providers → Email**: `Enable email provider`는 켜진 채로 두고, `Confirm email`만 **끄기** → Save.
+3. **Authentication → Rate Limits**: 기본값 그대로 두면 된다. 변경 불필요.
+4. **SQL Editor → New query**: `supabase/schema.sql` 전체를 붙여넣고 Run. 오류 없이 끝나야 함.
+5. **Project Settings → API**: `Project URL`과 `anon public` 키를 복사.
+
+## 2. 설정 파일
+```bash
+cp config.example.js config.js   # URL과 anon key 기입
+```
+`config.js`는 git에 올라가지 않는다. GitHub Pages로 배포할 때는 아래 3단계처럼 Actions가 만들어 넣는다.
+
+## 3. GitHub Pages 배포
+1. 이 저장소를 GitHub에 push.
+2. 저장소 **Settings → Secrets and variables → Actions → Variables**에 `SUPABASE_URL`, `SUPABASE_ANON_KEY` 추가 (anon key는 공개돼도 되는 값이므로 Variable로 충분).
+3. **Settings → Pages → Source: GitHub Actions**.
+4. `.github/workflows/pages.yml`이 push마다 `config.js`를 생성해 배포한다. 주소: `https://<user>.github.io/<repo>/`.
+
+## 4. 첫 관리자
+1. 배포된 페이지에서 `천정원`으로 가입.
+2. SQL Editor에서 실행: `update public.profiles set is_admin = true where name = '천정원';`
+
+## 5. 운영 메모
+- 무료 플랜은 7일간 활동이 없으면 일시정지된다. 대시보드에서 Restore 한 번이면 복구. 페이지 상단에 빨간 배너가 뜨면 이 경우다(연결 끊김 시에도 같은 배너가 뜨며 30초마다 재시도한다).
+- 파일 저장소는 총 1GB. 20MB 이상 또는 오래 보관할 파일은 seraph 경로로 적는다. 완료된 의뢰의 첨부는 정리한다.
+- 비밀번호 초기화: Supabase → Authentication → Users → 해당 사용자(이메일이 `u-…@board.local`) → Reset password / 또는 삭제 후 재가입.
+- 이름→이메일 변환: 이름의 UTF-8 hex. 관리자 화면의 이름으로 찾기 어려우면 브라우저 콘솔에서 `nameToEmail('이름')`.
+- 사용자 삭제(관리자 화면)는 SQL 함수 `admin_delete_user`를 호출한다. 삭제된 사용자는 기존 의뢰에 "탈퇴한 사용자"로 남는다.
+- 실시간: 다른 브라우저에서의 변경이 즉시 반영된다. 로그인 상태에서 새로고침해도 세션이 유지된다.
+
+## 6. 개발·테스트
+```bash
+npm install
+```
+
+세 가지 테스트 스크립트가 있다:
+
+| 스크립트 | 무엇을 검사하는가 | 필요한 것 |
+|---|---|---|
+| `npm test` | `src/lib.js`의 순수 로직 단위 테스트 (`tests/lib.test.mjs`) | 없음 |
+| `npm run test:rls` | Supabase RLS 정책·트리거 통합 테스트 (`tests/rls.test.mjs`) | 로컬 Supabase 스택(Docker) |
+| `npm run test:ui` | 헤드리스 Chrome으로 화면 흐름을 구동하는 UI 테스트, 약 25개 (`tests/ui.smoke.mjs`) | 로컬 Supabase 스택 + `npm run serve` 실행 중 + Chrome이 `/usr/bin/google-chrome`에 있어야 함 |
+
+`test:rls`와 `test:ui`는 로컬 스택이 필요하다:
+```bash
+npx supabase start       # 로컬 스택 기동 (Docker)
+docker exec -i supabase_db_lab_taskboard psql -U postgres -d postgres < supabase/schema.sql
+npm run test:rls         # 권한 규칙 통합 테스트
+# test:ui를 돌리려면 별도 터미널에서 npm run serve 를 켜 둔 채로 실행
+npm run serve            # http://localhost:5500 (config.js는 로컬 URL/키로)
+```
+`tests/helpers.mjs`가 `npx supabase status -o env`로 로컬 키를 읽으므로 `config.js`를 따로 채울 필요는 없다(테스트 자체는 키를 직접 읽어온다).
+
+다 쓴 뒤에는 로컬 스택을 반드시 내린다:
+```bash
+npx supabase stop
+```
+
+## 7. 화면에 쓰인 한국어 문구 (참고)
+큐 / 보낸 의뢰 / + 새 의뢰 / 키워드 관리 / 관리 / 진행중으로 / 완료 / 반려 / 넘기기 / 수정 / 취소
