@@ -34,7 +34,14 @@ export function createApi(client) {
     },
     async signOut() { await client.auth.signOut(); },
     async getSession() { return (await client.auth.getSession()).data.session; },
-    onAuthChange(cb) { return client.auth.onAuthStateChange((_e, s) => cb(s)); },
+    // Deferred with setTimeout(0), not queueMicrotask: this callback fires
+    // while supabase-js still holds its internal auth lock during session
+    // recovery (e.g. on a fresh page load with a persisted session). If cb
+    // runs synchronously (or even on a microtask) it can end up making
+    // REST calls that need that same lock, which then deadlocks forever —
+    // reproduced as loadAll() never issuing a single request on reload.
+    // Pushing to a real macrotask lets supabase-js release the lock first.
+    onAuthChange(cb) { return client.auth.onAuthStateChange((_e, s) => { setTimeout(() => cb(s), 0); }); },
 
     // ── read ──
     async loadAll() {

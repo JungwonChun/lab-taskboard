@@ -10,7 +10,7 @@ const root = document.getElementById('app');
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
   view: 'queue', assigneeId: null, projectFilter: 'all', authMode: 'login', authError: '',
-  openJobId: null,
+  openJobId: null, editingJobId: null,
 };
 let attUrls = {};
 
@@ -61,6 +61,14 @@ let pendingModalRefresh = false;
 const _render = render;
 export function renderAll() {
   _render();
+  // The edit form (job-edit) is a completely different modal from the detail
+  // view, and modalHasDraft() doesn't recognize a change to it (a radio, a
+  // select, a date, or just focus sitting on a button) as a draft — so a
+  // background re-render here would silently swap the open edit form out for
+  // the read-only detail. state.editingJobId means "leave modal-root alone
+  // entirely until the edit form itself is submitted or closed"; the app
+  // shell behind it (_render(), above) still updates live.
+  if (state.editingJobId) return;
   if (!state.openJobId) return;
   const j = curJob();
   if (!j) { state.openJobId = null; closeModal(); return; }
@@ -78,14 +86,27 @@ export const actions = {
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
   'logout': async () => { await api.signOut(); },
   'new-job': () => openModal(renderJobForm(state)),
-  'close-modal': () => { state.openJobId = null; closeModal(); },
+  // While editing (state.editingJobId set), 닫기/✕ should return to the
+  // detail view rather than just closing the modal outright.
+  'close-modal': () => {
+    if (state.editingJobId) {
+      const id = state.editingJobId;
+      state.editingJobId = null;
+      return openJob(id);
+    }
+    state.openJobId = null;
+    closeModal();
+  },
   'open-job': (el) => openJob(el.dataset.id),
   'job-start': async () => { await api.startJob(state.openJobId); toast('진행중으로 바꿨습니다'); },
   'job-done': () => { document.getElementById('inline-form').innerHTML = inlineForm('done', state, curJob()); },
   'job-reject': () => { document.getElementById('inline-form').innerHTML = inlineForm('reject', state, curJob()); },
   'job-handoff': () => { document.getElementById('inline-form').innerHTML = inlineForm('handoff', state, curJob()); },
   'job-cancel': async () => { if (confirm('이 의뢰를 취소할까요?')) { await api.cancelJob(state.openJobId); toast('취소했습니다'); } },
-  'job-edit': () => openModal(renderJobForm(state, curJob())),
+  // Capture the job before clearing openJobId — curJob() reads off
+  // state.openJobId, which we're about to null out so a background
+  // renderAll() can't touch the edit form (see renderAll()'s comment).
+  'job-edit': () => { const job = curJob(); state.editingJobId = job?.id ?? null; state.openJobId = null; openModal(renderJobForm(state, job)); },
   'job-delete': async () => { if (confirm('의뢰를 완전히 삭제할까요?')) { await api.deleteJob(state.openJobId); state.openJobId = null; closeModal(); toast('삭제했습니다'); } },
   'comment-delete': async (el) => { await api.deleteComment(el.dataset.id); },
   'att-delete': async (el) => { const a = state.attachments.find(x => x.id === el.dataset.id); if (a && confirm(`${a.filename} 삭제?`)) await api.deleteAttachment(a); },
@@ -157,6 +178,7 @@ forms['job'] = async (form) => {
   }
   closeModal();
   await refresh();
+  state.editingJobId = null;
   if (id) { state.openJobId = job.id; await openJob(job.id); } else { state.openJobId = null; }
   renderAll();
   toast(id ? '수정했습니다' : `의뢰를 제출했습니다 (${displayNameOf(job.assignee_id)} 큐)`);

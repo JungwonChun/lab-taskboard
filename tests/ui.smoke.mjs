@@ -36,19 +36,77 @@ function findRow(title) {
 function hasRow(title) {
   return Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title);
 }
-// Every mutation triggers *two* independent re-renders of an open detail
-// modal: the delegated listener's own post-mutation `refresh(); renderAll();`,
+
+// Reload is safe now (see src/api.js onAuthChange: the auth-state callback
+// is deferred with setTimeout so it never runs while supabase-js still
+// holds its session-recovery lock). Used wherever it's the simplest way to
+// get a guaranteed-fresh view of server state, instead of waiting on
+// realtime timing.
+async function reloadAndWaitReady(pageX) {
+  await pageX.reload({ waitUntil: 'networkidle0', timeout: 15000 });
+  await pageX.waitForSelector('.topbar .me', { timeout: 15000 });
+}
+
+// Every mutation in this app causes *two* re-renders of anything currently
+// open: the delegated listener's own post-mutation `refresh(); renderAll();`,
 // and — shortly after, indeterminately — the realtime subscription noticing
-// the very same row change and doing the same thing again. The first is what
-// the waitForFunction() badge checks below observe; the second can still
-// land a beat later and swap out the modal's DOM out from under an
-// immediately-following click. A short settle after each confirmed
-// transition absorbs that second, otherwise-unsynchronized re-render.
-const settle = (ms = 500) => new Promise((r) => setTimeout(r, ms));
+// the very same row change and doing the same thing again. Puppeteer's
+// ordinary `.click()` spans several CDP round trips (locate element, scroll
+// into view, read its bounding box, dispatch mouse down/up), which leaves a
+// real window for a stray re-render to swap the target out from under it
+// mid-click. Re-querying the DOM and dispatching a real `.click()` inside a
+// single evaluate() call closes that window: it can't observe a
+// half-replaced tree because renders are synchronous (one `innerHTML =`
+// assignment), so whatever's found is either the old element or the new one,
+// never a detached reference to either.
+async function clickAction(pageX, selector, { timeout = 10000 } = {}) {
+  await pageX.waitForSelector(selector, { timeout });
+  const clicked = await pageX.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    // .focus() before .click(): a real mouse click blurs whatever field
+    // was previously focused as part of the browser's own focusing steps,
+    // but a script-dispatched .click() does not — so a submit button
+    // clicked this way left an earlier textarea as document.activeElement,
+    // and modalHasDraft() reads any focused textarea/input/select as an
+    // unsaved draft, permanently blocking the post-submit re-render.
+    el.focus();
+    el.click();
+    return true;
+  }, selector);
+  assert.ok(clicked, `expected to find and click ${selector}`);
+}
+
+// Same idea as clickAction, for a row identified by its title text rather
+// than a stable selector.
+async function clickRow(pageX, title) {
+  await pageX.waitForFunction(hasRow, { timeout: 15000 }, title);
+  const clicked = await pageX.evaluate((t) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === t);
+    if (!row) return false;
+    row.click();
+    return true;
+  }, title);
+  assert.ok(clicked, `expected to find and click a row titled ${title}`);
+}
+
+// A condition wait, not a blind sleep: waits for network activity to settle
+// rather than a fixed delay. Used at the few points where a test keeps
+// interacting with the *same already-open* modal right after a mutation —
+// the mutation's own post-success refresh() and the (separately arriving)
+// realtime echo of that same change both fire a REST round trip, and if the
+// next step's DOM check/write lands in between, it can see a form the
+// second, delayed re-render is about to reset (e.g. wiping the inline
+// 완료/반려 form it had just injected). Reloading or opening a fresh job
+// (openAsB, createJobForB) already starts from a clean slate and doesn't
+// need this.
+async function waitForQuiet(pageX) {
+  await pageX.waitForNetworkIdle({ idleTime: 300, timeout: 5000 }).catch(() => {});
+}
 
 async function closeModalIfOpen(pageX) {
   if (await pageX.$('.modal')) {
-    await pageX.click('[data-action="close-modal"]').catch(() => {});
+    await clickAction(pageX, '[data-action="close-modal"]');
     await pageX.waitForFunction(() => !document.querySelector('.modal'), { timeout: 5000 }).catch(() => {});
   }
 }
@@ -136,6 +194,19 @@ test('sign up user A shows their name in the top bar', async () => {
   });
   if (uid) createdUserIds.push(uid);
   aUserId = uid;
+});
+
+test('reload while logged in still shows the queue', async () => {
+  // Regression test for the reload deadlock: onAuthStateChange's callback
+  // used to run synchronously while supabase-js still held its
+  // session-recovery lock, so a reload's loadAll() never issued a single
+  // REST request and the app hung on a blank screen forever. Fixed by
+  // deferring the callback with setTimeout (src/api.js onAuthChange).
+  await page.reload({ waitUntil: 'networkidle0', timeout: 15000 });
+  await page.waitForSelector('.topbar .me', { timeout: 15000 });
+  const meText = await page.$eval('.topbar .me', (el) => el.textContent);
+  assert.equal(meText, nameA);
+  await page.waitForSelector('.rows', { timeout: 15000 });
 });
 
 const keyword = uniq('PULSE');
@@ -301,15 +372,9 @@ test('sign up user B in a separate browser context', async () => {
   if (bUserId) createdUserIds.push(bUserId);
 
   // A's page needs B's profile row (for the assignee <select>) before it can
-  // create a job for B. NOTE: navigating an already-authenticated page again
-  // (page.reload()/page.goto()) hangs forever in this environment — the
-  // bundled supabase-js client's session-recovery path never resolves on a
-  // second load of a page that already has a persisted session in
-  // localStorage (reproduced in isolation: refresh() never completes, no
-  // REST request is even issued). So instead of reloading, we rely on A's
-  // page never having navigated away: its realtime subscription (wired up
-  // once at login) picks up the new 'profiles' row in the background, and we
-  // just wait for that to land in the always-live topbar <select>.
+  // create a job for B. Reload is simple and reliable now (see the
+  // onAuthChange fix in src/api.js).
+  await reloadAndWaitReady(page);
   await page.waitForFunction(
     (uid) => !!document.querySelector(`select[data-action="assignee"] option[value="${uid}"]`),
     { timeout: 15000 }, bUserId,
@@ -317,28 +382,23 @@ test('sign up user B in a separate browser context', async () => {
 });
 
 async function createJobForB(title) {
-  await page.click('[data-action="new-job"]');
+  await closeModalIfOpen(page);
+  await clickAction(page, '[data-action="new-job"]');
   await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
   await page.type('form[data-form="job"] input[name="title"]', title);
   await page.select('form[data-form="job"] select[name="assignee_id"]', bUserId);
   await Promise.all([
     page.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
-    page.click('form[data-form="job"] button.primary'),
+    clickAction(page, 'form[data-form="job"] button.primary'),
   ]);
+  await waitForQuiet(page);
 }
 
-// B never reloads either (same hang risk as above) — her page has had a live
-// realtime subscription since she signed up, so a job just created for her
-// shows up in her queue on its own; we just wait for it.
+// Reload B's page for a guaranteed-fresh queue (rather than waiting on
+// realtime timing), then open the named job.
 async function openAsB(title) {
-  // if a previous test left B's detail modal open, its full-screen backdrop
-  // sits on top of the row list and swallows the click below meant for the
-  // new row (closing the stale modal instead of opening the new one) —
-  // start from a clean slate every time.
-  await closeModalIfOpen(pageB);
-  await pageB.waitForFunction(hasRow, { timeout: 15000 }, title);
-  const rowHandle = await pageB.evaluateHandle(findRow, title);
-  await rowHandle.click();
+  await reloadAndWaitReady(pageB);
+  await clickRow(pageB, title);
   await pageB.waitForSelector('.modal', { timeout: 5000 });
 }
 
@@ -355,26 +415,25 @@ test('A creates a job for B; B opens it, sees queue position 1, and starts it', 
   const startBtn = await pageB.$('[data-action="job-start"]');
   assert.ok(startBtn, 'expected a 진행중으로 button for the assignee on a waiting job');
 
-  await pageB.click('[data-action="job-start"]');
+  await clickAction(pageB, '[data-action="job-start"]');
   await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
   const hasStart = await pageB.evaluate(() => document.querySelector('.modal').textContent.includes('시작'));
   assert.ok(hasStart, 'expected a 시작 (started) timestamp once in_progress');
-  await settle();
+  await waitForQuiet(pageB);
 });
 
 test('B finishes the job with a memo; badge, memo box, and result upload appear', async () => {
-  await pageB.click('[data-action="job-done"]');
+  await clickAction(pageB, '[data-action="job-done"]');
   await pageB.waitForSelector('#inline-form form[data-form="done"] textarea[name="result_note"]', { timeout: 5000 });
   const memo = uniq('완료메모');
   await pageB.type('#inline-form textarea[name="result_note"]', memo);
-  await pageB.click('#inline-form button.primary');
+  await clickAction(pageB, '#inline-form button.primary');
   await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '완료', { timeout: 10000 });
 
   const bodyText = await pageB.$eval('.modal', (el) => el.textContent);
   assert.ok(bodyText.includes(memo), 'expected the completion memo to be shown');
   const resultInput = await pageB.$('input[type="file"][data-action="att-upload"][data-kind="result"]');
   assert.ok(resultInput, 'expected a result-attachment file input on a done job (assignee can still attach results)');
-  await settle();
 });
 
 let job2Title;
@@ -384,9 +443,9 @@ test('second job: B\'s empty reject reason is blocked, then a real reason reject
   await createJobForB(job2Title);
   await openAsB(job2Title);
 
-  await pageB.click('[data-action="job-reject"]');
+  await clickAction(pageB, '[data-action="job-reject"]');
   await pageB.waitForSelector('#inline-form form[data-form="reject"] textarea[name="reject_reason"]', { timeout: 5000 });
-  await pageB.click('#inline-form button.danger');
+  await clickAction(pageB, '#inline-form button.danger');
   // blocked by the textarea's `required` attribute: no navigation, form still there
   const stillOpen = await pageB.$('#inline-form form[data-form="reject"]');
   assert.ok(stillOpen, 'expected the reject form to remain open when the reason is empty');
@@ -395,11 +454,10 @@ test('second job: B\'s empty reject reason is blocked, then a real reason reject
 
   const reason = uniq('반려사유');
   await pageB.type('#inline-form textarea[name="reject_reason"]', reason);
-  await pageB.click('#inline-form button.danger');
+  await clickAction(pageB, '#inline-form button.danger');
   await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '반려', { timeout: 10000 });
   const bodyText = await pageB.$eval('.modal', (el) => el.textContent);
   assert.ok(bodyText.includes(reason), 'expected the reject reason to be shown in the red box');
-  await settle();
 });
 
 let job3Title;
@@ -409,22 +467,20 @@ test('third job: B hands off to A; it lands at the end of A\'s queue and leaves 
   await createJobForB(job3Title);
   await openAsB(job3Title);
 
-  await pageB.click('[data-action="job-handoff"]');
+  await clickAction(pageB, '[data-action="job-handoff"]');
   await pageB.waitForSelector('#inline-form form[data-form="handoff"] select[name="assignee_id"]', { timeout: 5000 });
   await pageB.select('#inline-form select[name="assignee_id"]', aUserId);
-  await pageB.click('#inline-form button.primary');
+  await clickAction(pageB, '#inline-form button.primary');
   await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '대기', { timeout: 10000 });
-  await settle();
 
-  // B's queue no longer lists it (assignee changed away from B)
-  await pageB.click('[data-action="close-modal"]');
+  // B's queue no longer lists it (assignee changed away from B) — reload
+  // for a guaranteed-fresh check rather than trusting whatever's cached.
+  await reloadAndWaitReady(pageB);
   const stillInB = await pageB.evaluate(hasRow, job3Title);
   assert.equal(stillInB, false, 'expected job3 to have left B\'s open queue after handoff');
 
-  // it shows up at the end of A's open queue (picked up live via A's own
-  // realtime subscription — see the no-reload note above), after the
-  // pre-existing jobs
-  await page.click('[data-action="view"][data-view="queue"]');
+  // it shows up at the end of A's open queue, after the pre-existing jobs
+  await reloadAndWaitReady(page);
   await page.waitForFunction(hasRow, { timeout: 15000 }, job3Title);
   const order = await page.evaluate((titles) => {
     // the open queue is the first ".rows" block (the "past" one lives inside <details>)
@@ -437,55 +493,98 @@ test('third job: B hands off to A; it lands at the end of A\'s queue and leaves 
     return row?.querySelector('.badge')?.textContent;
   }, job3Title);
   assert.equal(badge, '대기');
-  await settle();
 });
 
 test('A edits job3\'s title, then cancels it', async () => {
-  const rowHandle = await page.evaluateHandle(findRow, job3Title);
-  await rowHandle.click();
+  await clickRow(page, job3Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
 
   const editBtn = await page.$('[data-action="job-edit"]');
   assert.ok(editBtn, 'expected a 수정 button for the requester on a waiting job');
 
-  await page.click('[data-action="job-edit"]');
+  await clickAction(page, '[data-action="job-edit"]');
   await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
   const newTitle = uniq('수정된작업3');
   await page.evaluate(() => { document.querySelector('form[data-form="job"] input[name="title"]').value = ''; });
   await page.type('form[data-form="job"] input[name="title"]', newTitle);
   await Promise.all([
     page.waitForFunction((title) => document.querySelector('.modal h3')?.textContent.includes(title), { timeout: 15000 }, newTitle),
-    page.click('form[data-form="job"] button.primary'),
+    clickAction(page, 'form[data-form="job"] button.primary'),
   ]);
   job3Title = newTitle;
-  await settle();
+  await waitForQuiet(page);
 
   await page.evaluate(() => { window.confirm = () => true; });
-  await page.click('[data-action="job-cancel"]');
+  await clickAction(page, '[data-action="job-cancel"]');
   await page.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '취소', { timeout: 10000 });
-  await settle();
+});
+
+let job7Title, job8Title;
+
+test('editing survives a background list update triggered by another job (editingJobId protects the modal)', async () => {
+  job7Title = uniq('작업7');
+  job8Title = uniq('작업8');
+  await closeModalIfOpen(page);
+  await createJobForB(job7Title);
+  await createJobForB(job8Title);
+
+  // A opens job7 (as requester) and starts editing it, changing only urgency
+  await page.click('[data-action="view"][data-view="sent"]');
+  await clickRow(page, job7Title);
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  await clickAction(page, '[data-action="job-edit"]');
+  await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+  await page.click('form[data-form="job"] input[name="urgency"][value="5"]');
+
+  // B starts job8 — a different job — from her own page. The resulting
+  // 'jobs' table change still reaches A's long-lived realtime subscription
+  // and triggers a background renderAll() while A's edit form is open.
+  await openAsB(job8Title);
+  await clickAction(pageB, '[data-action="job-start"]');
+  await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
+
+  // A's row list (behind the still-open edit form) picks up job8's new
+  // status live — proving the background re-render actually ran...
+  await page.waitForFunction((title) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === title);
+    return row?.querySelector('.badge')?.textContent === '진행중';
+  }, { timeout: 15000 }, job8Title);
+
+  // ...while A's edit form — a completely different modal — was left alone.
+  const stillEditing = await page.evaluate(() => ({
+    formPresent: !!document.querySelector('form[data-form="job"]'),
+    urgency: document.querySelector('form[data-form="job"] input[name="urgency"]:checked')?.value,
+  }));
+  assert.ok(stillEditing.formPresent, 'expected the edit form to still be open');
+  assert.equal(stillEditing.urgency, '5', 'expected the changed urgency radio to still be selected');
+
+  // A saves; the (unchanged) title and the new urgency both persist
+  await Promise.all([
+    page.waitForFunction((title) => document.querySelector('.modal h3')?.textContent.includes(title), { timeout: 15000 }, job7Title),
+    clickAction(page, 'form[data-form="job"] button.primary'),
+  ]);
+  const h3Text = await page.$eval('.modal h3', (el) => el.textContent);
+  assert.ok(h3Text.includes(job7Title), 'expected the unchanged title to persist');
+  assert.ok(h3Text.includes('🥵'), 'expected the urgency-5 emoji to show after saving');
 });
 
 let job5Title;
 
 test('comments: A posts one, B sees it live, only the author can delete', async () => {
-  // a fresh, still-open job (rather than reusing the done job1, which sits
+  // a fresh, still-open job (rather than reusing a done job, which sits
   // inside a collapsed <details> whose `open` state a background re-render
-  // would reset, racing with the click below)
+  // would reset)
   job5Title = uniq('작업5');
   await closeModalIfOpen(page);
   await createJobForB(job5Title);
-  await settle();
 
   await page.click('[data-action="view"][data-view="sent"]');
-  await page.waitForFunction(hasRow, { timeout: 15000 }, job5Title);
-  const rowHandle = await page.evaluateHandle(findRow, job5Title);
-  await rowHandle.click();
+  await clickRow(page, job5Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
 
   const commentText = uniq('댓글A');
   await page.type('form[data-form="comment"] textarea[name="body"]', commentText);
-  await page.click('form[data-form="comment"] button.primary');
+  await clickAction(page, 'form[data-form="comment"] button.primary');
   await page.waitForFunction((text) =>
     Array.from(document.querySelectorAll('.comments li .text')).some((el) => el.textContent === text), { timeout: 10000 }, commentText);
   const who = await page.evaluate((text) => {
@@ -494,21 +593,48 @@ test('comments: A posts one, B sees it live, only the author can delete', async 
   }, commentText);
   assert.equal(who, nameA);
 
-  // B sees the same comment live (her page's own realtime subscription;
-  // no reload — see the no-reload note near the B-signup test above). By
-  // this point several other realtime events have already gone over the
-  // same channel in this test run, so give this one a longer window.
-  await openAsB(job5Title);
+  // B sees the same comment — reload for a guaranteed-fresh view.
+  await reloadAndWaitReady(pageB);
+  await clickRow(pageB, job5Title);
+  await pageB.waitForSelector('.modal', { timeout: 5000 });
   await pageB.waitForFunction((text) =>
-    Array.from(document.querySelectorAll('.comments li .text')).some((el) => el.textContent === text), { timeout: 20000 }, commentText);
+    Array.from(document.querySelectorAll('.comments li .text')).some((el) => el.textContent === text), { timeout: 10000 }, commentText);
   const delBtnOnB = await pageB.$('.comments li button[data-action="comment-delete"]');
   assert.equal(delBtnOnB, null, 'B should not see a delete button on A\'s own comment');
 
   // A deletes her own comment
-  await page.click('.comments li button[data-action="comment-delete"]');
+  await clickAction(page, '.comments li button[data-action="comment-delete"]');
   await page.waitForFunction((text) =>
     !Array.from(document.querySelectorAll('.comments li .text')).some((el) => el.textContent === text), { timeout: 10000 }, commentText);
-  await settle();
+});
+
+test('uploads a result attachment from the detail modal, then deletes it', async () => {
+  const jobXTitle = uniq('작업X');
+  await closeModalIfOpen(page);
+  await createJobForB(jobXTitle);
+  await openAsB(jobXTitle);
+
+  const tmpPath = path.join(os.tmpdir(), `smoke-result-${Date.now()}.txt`);
+  fs.writeFileSync(tmpPath, 'result file contents\n');
+
+  const fileInput = await pageB.$('input[type="file"][data-action="att-upload"][data-kind="result"]');
+  assert.ok(fileInput, 'expected a result-attachment file input (B is the assignee)');
+  await fileInput.uploadFile(tmpPath);
+  await pageB.waitForFunction(() => !!document.querySelector('.files li'), { timeout: 15000 });
+
+  // Reopen so the modal re-fetches signed URLs (attUrls is populated once,
+  // at open time) and the just-uploaded file shows as an actual link.
+  await pageB.click('[data-action="close-modal"]').catch(() => {});
+  await openAsB(jobXTitle);
+  await pageB.waitForFunction(() => !!document.querySelector('.files a'), { timeout: 15000 });
+  const fileHref = await pageB.$eval('.files a', (el) => el.getAttribute('href'));
+  assert.ok(fileHref, 'expected the uploaded result attachment to show as a link');
+
+  await pageB.evaluate(() => { window.confirm = () => true; });
+  await clickAction(pageB, '.files button[data-action="att-delete"]');
+  await pageB.waitForFunction(() => !document.querySelector('.files a'), { timeout: 10000 });
+
+  fs.unlinkSync(tmpPath);
 });
 
 test('draft preservation: A\'s unsent comment survives a background re-render from B\'s change', async () => {
@@ -516,13 +642,10 @@ test('draft preservation: A\'s unsent comment survives a background re-render fr
   await closeModalIfOpen(page);
   await page.click('[data-action="view"][data-view="queue"]');
   await createJobForB(job4Title);
-  await settle();
 
   // A opens it as requester (in 보낸 의뢰) and starts typing a comment, without submitting
   await page.click('[data-action="view"][data-view="sent"]');
-  await page.waitForFunction(hasRow, { timeout: 15000 }, job4Title);
-  const rowHandle = await page.evaluateHandle(findRow, job4Title);
-  await rowHandle.click();
+  await clickRow(page, job4Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
 
   // B opens the same job in the other browser context
@@ -532,16 +655,19 @@ test('draft preservation: A\'s unsent comment survives a background re-render fr
   await page.type('form[data-form="comment"] textarea[name="body"]', draftText);
 
   // B changes the status while A's textarea has unsent text
-  await pageB.click('[data-action="job-start"]');
+  await clickAction(pageB, '[data-action="job-start"]');
   await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
 
-  // give A's realtime subscription (api.subscribe → refresh(); renderAll())
-  // time to fire and attempt a re-render of the open detail modal
+  // There's no positive DOM signal for "a background re-render was
+  // attempted and correctly suppressed" — the point of this assertion is
+  // that nothing visibly changes. This bounded wait just gives A's realtime
+  // subscription (api.subscribe → refresh(); renderAll()) a realistic
+  // window to have fired at least once before we check the draft survived.
   await new Promise((r) => setTimeout(r, 1500));
   const stillDraft = await page.$eval('form[data-form="comment"] textarea[name="body"]', (el) => el.value);
   assert.equal(stillDraft, draftText, 'expected the in-progress comment draft to survive a background re-render');
 
-  await page.click('form[data-form="comment"] button.primary');
+  await clickAction(page, 'form[data-form="comment"] button.primary');
   await page.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
   const bodyText = await page.$eval('.modal', (el) => el.textContent);
   assert.ok(bodyText.includes(draftText), 'expected the submitted draft comment to now be visible, alongside the status B set');
