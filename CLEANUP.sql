@@ -19,7 +19,11 @@ delete from auth.users u
 using public.profiles p
 where p.id = u.id
   and (p.name like '점검%' or p.name like '진단%' or p.name like '검증%'
-       or p.name like '집계%' or p.name = '테스트확인');
+       or p.name like '집계%' or p.name like '확인%' or p.name = '테스트확인');
+
+-- 계정이 지워지면서 새로 주인을 잃은 의뢰도 함께 정리
+delete from public.jobs
+where requester_id is null and assignee_id is null;
 
 -- 결과 확인
 select name, is_admin as 관리자 from public.profiles order by created_at;
