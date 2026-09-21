@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+on:
+  push: { branches: [master, main] }
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deployment.outputs.page_url }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build _site (publish only the static site, not the whole repo)
+        run: |
+          mkdir -p _site
+          cp -r index.html style.css app.js src _site/
+          cp .nojekyll _site/ 2>/dev/null || true
+      - name: Write config.js
+        # The Variables come in only through `env:`, never interpolated
+        # directly into the run script's text (`${{ vars.X }}` inline would
+        # let a value containing shell metacharacters run as commands here).
+        # The heredoc below uses a quoted delimiter ('EOF') so its body is
+        # written byte-for-byte with no shell expansion at all; the actual
+        # substitution happens afterward in node, which treats each value as
+        # inert string data (via JSON.stringify), not as something the shell
+        # re-parses.
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          cat > _site/config.js <<'EOF'
+          window.TASKBOARD_CONFIG = {
+            SUPABASE_URL: "__SUPABASE_URL__",
+            SUPABASE_ANON_KEY: "__SUPABASE_ANON_KEY__",
+          };
+          EOF
+          node -e '
+            const fs = require("fs");
+            const path = "_site/config.js";
+            let s = fs.readFileSync(path, "utf8");
+            s = s.replace("\"__SUPABASE_URL__\"", JSON.stringify(process.env.SUPABASE_URL || ""));
+            s = s.replace("\"__SUPABASE_ANON_KEY__\"", JSON.stringify(process.env.SUPABASE_ANON_KEY || ""));
+            fs.writeFileSync(path, s);
+          '
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: '_site' }
+      - id: deployment
+        uses: actions/deploy-pages@v4
