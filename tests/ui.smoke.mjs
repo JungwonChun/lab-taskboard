@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
-import { LOCAL_URL, ANON_KEY, uniq, cleanup, admin } from './helpers.mjs';
+import { LOCAL_URL, ANON_KEY, uniq, cleanup, admin, newUser, promote } from './helpers.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const PORT = 5599;
@@ -75,6 +75,22 @@ async function clickAction(pageX, selector, { timeout = 10000 } = {}) {
     return true;
   }, selector);
   assert.ok(clicked, `expected to find and click ${selector}`);
+}
+
+// Same idea as clickAction, for a <select> whose change listener is
+// delegated the same way — set .value and dispatch 'change' inside one
+// evaluate() call so a re-render between query and interaction can't leave
+// us holding a detached node.
+async function selectAction(pageX, selector, value, { timeout = 10000 } = {}) {
+  await pageX.waitForSelector(selector, { timeout });
+  const ok = await pageX.evaluate((sel, val) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    el.value = val;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }, selector, value);
+  assert.ok(ok, `expected to find and select ${value} on ${selector}`);
 }
 
 // Same idea as clickAction, for a row identified by its title text rather
@@ -174,13 +190,13 @@ test('shows the auth card on first load', async () => {
 const nameA = uniq('스모크A');
 
 test('sign up user A shows their name in the top bar', async () => {
-  await page.click('[data-action="auth-mode"][data-mode="signup"]');
+  await clickAction(page, '[data-action="auth-mode"][data-mode="signup"]');
   await page.waitForSelector('form[data-form="auth"][data-mode="signup"]', { timeout: 5000 });
   await page.type('form[data-form="auth"] input[name="name"]', nameA);
   await page.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     page.waitForSelector('.topbar .me', { timeout: 15000 }),
-    page.click('form[data-form="auth"] button.primary'),
+    clickAction(page, 'form[data-form="auth"] button.primary'),
   ]);
   const meText = await page.$eval('.topbar .me', (el) => el.textContent);
   assert.equal(meText, nameA);
@@ -214,12 +230,12 @@ let jobTitle;
 
 test('create a new job assigned to self with a new keyword, urgency 5, past deadline', async () => {
   jobTitle = uniq('작업');
-  await page.click('[data-action="new-job"]');
+  await clickAction(page, '[data-action="new-job"]');
   await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
 
   await page.type('form[data-form="job"] input[name="title"]', jobTitle);
   await page.type('form[data-form="job"] input[name="new_project"]', keyword);
-  await page.click('form[data-form="job"] input[name="urgency"][value="5"]');
+  await clickAction(page, 'form[data-form="job"] input[name="urgency"][value="5"]');
 
   // a deadline in the past (yesterday)
   const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -237,7 +253,7 @@ test('create a new job assigned to self with a new keyword, urgency 5, past dead
 
   await Promise.all([
     page.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
-    page.click('form[data-form="job"] button.primary'),
+    clickAction(page, 'form[data-form="job"] button.primary'),
   ]);
 
   await page.waitForSelector('.row .pos', { timeout: 15000 });
@@ -247,22 +263,25 @@ test('create a new job assigned to self with a new keyword, urgency 5, past dead
   }, { timeout: 15000 }, jobTitle);
   assert.ok(row);
 
-  const rowHandle = await page.evaluateHandle((title) => {
-    return Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === title);
+  const rowInfo = await page.evaluate((title) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === title);
+    if (!row) return null;
+    return {
+      pos: row.querySelector('.pos').textContent.trim(),
+      emoji: row.querySelector('.emoji').textContent.trim(),
+      isOverdue: row.classList.contains('overdue'),
+      meta: row.querySelector('.meta').textContent,
+    };
   }, jobTitle);
-
-  const pos = await rowHandle.evaluate((el) => el.querySelector('.pos').textContent.trim());
-  assert.equal(pos, '1');
-  const emoji = await rowHandle.evaluate((el) => el.querySelector('.emoji').textContent.trim());
-  assert.equal(emoji, '🥵');
-  const isOverdue = await rowHandle.evaluate((el) => el.classList.contains('overdue'));
-  assert.ok(isOverdue, 'row should have the overdue class');
-  const meta = await rowHandle.evaluate((el) => el.querySelector('.meta').textContent);
-  assert.ok(meta.includes(`#${keyword}`), `expected meta to include #${keyword}, got: ${meta}`);
+  assert.ok(rowInfo, `expected to find a row titled ${jobTitle}`);
+  assert.equal(rowInfo.pos, '1');
+  assert.equal(rowInfo.emoji, '🥵');
+  assert.ok(rowInfo.isOverdue, 'row should have the overdue class');
+  assert.ok(rowInfo.meta.includes(`#${keyword}`), `expected meta to include #${keyword}, got: ${rowInfo.meta}`);
 });
 
 test('보낸 의뢰 tab lists the created job', async () => {
-  await page.click('[data-action="view"][data-view="sent"]');
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
   await page.waitForFunction((title) => {
     const rows = Array.from(document.querySelectorAll('.row'));
     return rows.some((r) => r.querySelector('.title')?.textContent === title);
@@ -272,12 +291,12 @@ test('보낸 의뢰 tab lists the created job', async () => {
   }, jobTitle);
   assert.ok(found, 'expected the sent job to be listed under 보낸 의뢰');
   // switch back to queue for later steps
-  await page.click('[data-action="view"][data-view="queue"]');
+  await clickAction(page, '[data-action="view"][data-view="queue"]');
   await page.waitForSelector('.rows', { timeout: 10000 });
 });
 
 test('project filter hides/shows the job by keyword', async () => {
-  await page.select('select[data-action="project-filter"]', '00000000-0000-0000-0000-000000000000'); // 미분류
+  await selectAction(page, 'select[data-action="project-filter"]', '00000000-0000-0000-0000-000000000000'); // 미분류
   await page.waitForFunction((title) => {
     return !Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title);
   }, { timeout: 10000 }, jobTitle);
@@ -288,7 +307,7 @@ test('project filter hides/shows the job by keyword', async () => {
   }, keyword);
   assert.ok(keywordValue, `expected a filter option for keyword ${keyword}`);
 
-  await page.select('select[data-action="project-filter"]', keywordValue);
+  await selectAction(page, 'select[data-action="project-filter"]', keywordValue);
   await page.waitForFunction((title) => {
     return Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title);
   }, { timeout: 10000 }, jobTitle);
@@ -297,13 +316,13 @@ test('project filter hides/shows the job by keyword', async () => {
 test('attach a file to the job and see the attachment count', async () => {
   // test 5 left the project filter on the custom keyword; reset to 'all' so a
   // new job in the default (미분류) project is actually visible in the queue.
-  await page.select('select[data-action="project-filter"]', 'all');
+  await selectAction(page, 'select[data-action="project-filter"]', 'all');
   await page.waitForSelector('.rows', { timeout: 10000 });
 
   const tmpPath = path.join(os.tmpdir(), `smoke-attach-${Date.now()}.txt`);
   fs.writeFileSync(tmpPath, 'hello from the ui smoke test\n');
 
-  await page.click('[data-action="new-job"]');
+  await clickAction(page, '[data-action="new-job"]');
   await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
   const attachTitle = uniq('첨부작업');
   attachTitleGlobal = attachTitle;
@@ -314,7 +333,7 @@ test('attach a file to the job and see the attachment count', async () => {
 
   await Promise.all([
     page.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
-    page.click('form[data-form="job"] button.primary'),
+    clickAction(page, 'form[data-form="job"] button.primary'),
   ]);
 
   await page.waitForFunction((title) => {
@@ -352,13 +371,13 @@ test('sign up user B in a separate browser context', async () => {
 
   await pageB.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   await pageB.waitForSelector('.auth', { timeout: 10000 });
-  await pageB.click('[data-action="auth-mode"][data-mode="signup"]');
+  await clickAction(pageB, '[data-action="auth-mode"][data-mode="signup"]');
   await pageB.waitForSelector('form[data-form="auth"][data-mode="signup"]', { timeout: 5000 });
   await pageB.type('form[data-form="auth"] input[name="name"]', nameB);
   await pageB.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     pageB.waitForSelector('.topbar .me', { timeout: 15000 }),
-    pageB.click('form[data-form="auth"] button.primary'),
+    clickAction(pageB, 'form[data-form="auth"] button.primary'),
   ]);
   const meText = await pageB.$eval('.topbar .me', (el) => el.textContent);
   assert.equal(meText, nameB);
@@ -529,12 +548,12 @@ test('editing survives a background list update triggered by another job (editin
   await createJobForB(job8Title);
 
   // A opens job7 (as requester) and starts editing it, changing only urgency
-  await page.click('[data-action="view"][data-view="sent"]');
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
   await clickRow(page, job7Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
   await clickAction(page, '[data-action="job-edit"]');
   await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
-  await page.click('form[data-form="job"] input[name="urgency"][value="5"]');
+  await clickAction(page, 'form[data-form="job"] input[name="urgency"][value="5"]');
 
   // B starts job8 — a different job — from her own page. The resulting
   // 'jobs' table change still reaches A's long-lived realtime subscription
@@ -578,7 +597,7 @@ test('comments: A posts one, B sees it live, only the author can delete', async 
   await closeModalIfOpen(page);
   await createJobForB(job5Title);
 
-  await page.click('[data-action="view"][data-view="sent"]');
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
   await clickRow(page, job5Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
 
@@ -624,7 +643,7 @@ test('uploads a result attachment from the detail modal, then deletes it', async
 
   // Reopen so the modal re-fetches signed URLs (attUrls is populated once,
   // at open time) and the just-uploaded file shows as an actual link.
-  await pageB.click('[data-action="close-modal"]').catch(() => {});
+  await closeModalIfOpen(pageB);
   await openAsB(jobXTitle);
   await pageB.waitForFunction(() => !!document.querySelector('.files a'), { timeout: 15000 });
   const fileHref = await pageB.$eval('.files a', (el) => el.getAttribute('href'));
@@ -640,11 +659,11 @@ test('uploads a result attachment from the detail modal, then deletes it', async
 test('draft preservation: A\'s unsent comment survives a background re-render from B\'s change', async () => {
   const job4Title = uniq('작업4');
   await closeModalIfOpen(page);
-  await page.click('[data-action="view"][data-view="queue"]');
+  await clickAction(page, '[data-action="view"][data-view="queue"]');
   await createJobForB(job4Title);
 
   // A opens it as requester (in 보낸 의뢰) and starts typing a comment, without submitting
-  await page.click('[data-action="view"][data-view="sent"]');
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
   await clickRow(page, job4Title);
   await page.waitForSelector('.modal', { timeout: 5000 });
 
@@ -671,6 +690,184 @@ test('draft preservation: A\'s unsent comment survives a background re-render fr
   await page.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
   const bodyText = await page.$eval('.modal', (el) => el.textContent);
   assert.ok(bodyText.includes(draftText), 'expected the submitted draft comment to now be visible, alongside the status B set');
+});
+
+// ───────────────────────── Task 7: keyword management + admin panel ─────────────────────────
+
+function findManageListItem(nameWithHash) {
+  return Array.from(document.querySelectorAll('.list-manage li')).find((li) => li.querySelector('.name')?.textContent.includes(nameWithHash));
+}
+
+test('keyword modal: add K1, rename to K2, delete it, and its job falls back to 미분류', async () => {
+  await closeModalIfOpen(page);
+  await clickAction(page, '[data-action="view"][data-view="queue"]');
+  await selectAction(page, 'select[data-action="project-filter"]', 'all');
+
+  const k1 = uniq('K1');
+  const k2 = uniq('K2');
+
+  await clickAction(page, '[data-action="manage-projects"]');
+  await page.waitForSelector('form[data-form="project-add"]', { timeout: 5000 });
+  await page.type('form[data-form="project-add"] input[name="name"]', k1);
+  await clickAction(page, 'form[data-form="project-add"] button.primary');
+  // 15s, matching every other post-mutation wait in this suite (see e.g. the
+  // job-creation waits above): this round-trips through the server (insert
+  // + refresh() + re-render, or the realtime echo of the same), same class
+  // of wait as those, so it gets the same budget rather than the tighter
+  // 10s a first draft of this test used, which one CI run exceeded under load.
+  await page.waitForFunction((k) => Array.from(document.querySelectorAll('.list-manage li')).some((li) => li.querySelector('.name')?.textContent.includes('#' + k)), { timeout: 15000 }, k1);
+
+  // window.prompt is synchronous and blocking in a real browser; stub it to
+  // hand back the new name instead, the way the app's own prompt() call for
+  // project-rename expects.
+  await page.evaluate((newName) => { window.prompt = () => newName; }, k2);
+  await clickAction(page, `.list-manage li button[data-action="project-rename"][data-name="${k1}"]`);
+  await page.waitForFunction((k) => Array.from(document.querySelectorAll('.list-manage li')).some((li) => li.querySelector('.name')?.textContent.includes('#' + k)), { timeout: 15000 }, k2);
+  const stillHasK1 = await page.evaluate((k) => Array.from(document.querySelectorAll('.list-manage li')).some((li) => li.querySelector('.name')?.textContent.includes('#' + k)), k1);
+  assert.equal(stillHasK1, false, 'expected the old K1 name to be gone after rename');
+
+  // the locked 미분류 row shows "고정" and no action buttons
+  const uncategorized = await page.evaluate(() => {
+    const li = Array.from(document.querySelectorAll('.list-manage li')).find((li) => li.querySelector('.name')?.textContent.includes('#미분류'));
+    if (!li) return null;
+    return { hasFixedHint: li.textContent.includes('고정'), hasButtons: !!li.querySelector('button') };
+  });
+  assert.ok(uncategorized, 'expected a #미분류 row in the keyword modal');
+  assert.ok(uncategorized.hasFixedHint, 'expected 고정 hint on the 미분류 row');
+  assert.equal(uncategorized.hasButtons, false, 'expected no buttons on the 미분류 row');
+
+  await closeModalIfOpen(page);
+
+  // create a job under K2
+  const k2JobTitle = uniq('K2작업');
+  await clickAction(page, '[data-action="new-job"]');
+  await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+  await page.type('form[data-form="job"] input[name="title"]', k2JobTitle);
+  const k2Value = await page.evaluate((k) => {
+    const opts = Array.from(document.querySelectorAll('form[data-form="job"] select[name="project_id"] option'));
+    return opts.find((o) => o.textContent === '#' + k || o.textContent === k)?.value;
+  }, k2);
+  assert.ok(k2Value, `expected a project_id option for #${k2}`);
+  await selectAction(page, 'form[data-form="job"] select[name="project_id"]', k2Value);
+  await Promise.all([
+    page.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
+    clickAction(page, 'form[data-form="job"] button.primary'),
+  ]);
+  await page.waitForFunction((title) => Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title), { timeout: 15000 }, k2JobTitle);
+
+  // delete K2 (confirm -> true)
+  await page.evaluate(() => { window.confirm = () => true; });
+  await clickAction(page, '[data-action="manage-projects"]');
+  await page.waitForSelector('form[data-form="project-add"]', { timeout: 5000 });
+  await clickAction(page, `.list-manage li button[data-action="project-delete"][data-name="${k2}"]`);
+  await page.waitForFunction((k) => !Array.from(document.querySelectorAll('.list-manage li')).some((li) => li.querySelector('.name')?.textContent.includes('#' + k)), { timeout: 15000 }, k2);
+  await closeModalIfOpen(page);
+
+  await page.waitForFunction((title) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === title);
+    return row?.querySelector('.meta')?.textContent.includes('#미분류');
+  }, { timeout: 15000 }, k2JobTitle);
+});
+
+let cUserId;
+const nameC = uniq('스모크C');
+let contextC, pageC;
+
+test('admin panel: no 관리 button before promotion, appears after, lists users, and deletes a throwaway user', async () => {
+  const hadAdminBefore = await page.evaluate(() => !!document.querySelector('[data-action="admin"]'));
+  assert.equal(hadAdminBefore, false, 'expected no 관리 button before A is promoted');
+
+  await promote(aUserId);
+  await reloadAndWaitReady(page);
+  await page.waitForFunction(() => !!document.querySelector('[data-action="admin"]'), { timeout: 15000 });
+
+  // set up throwaway user C, sign in on their own browser page, and give A's
+  // page a fresh view of the profiles list so C shows up in the assignee select
+  const { user: cUser } = await newUser(nameC);
+  cUserId = cUser.id;
+  createdUserIds.push(cUserId);
+
+  contextC = await browser.createBrowserContext();
+  pageC = await contextC.newPage();
+  await pageC.evaluateOnNewDocument((url, key) => {
+    window.TASKBOARD_CONFIG = { SUPABASE_URL: url, SUPABASE_ANON_KEY: key };
+  }, LOCAL_URL, ANON_KEY);
+  await pageC.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+  await pageC.waitForSelector('.auth', { timeout: 10000 });
+  await pageC.type('form[data-form="auth"] input[name="name"]', nameC);
+  await pageC.type('form[data-form="auth"] input[name="password"]', 'secret123');
+  await Promise.all([
+    pageC.waitForSelector('.topbar .me', { timeout: 15000 }),
+    clickAction(pageC, 'form[data-form="auth"] button.primary'),
+  ]);
+
+  await reloadAndWaitReady(page);
+  await page.waitForFunction((uid) => !!document.querySelector(`select[data-action="assignee"] option[value="${uid}"]`), { timeout: 15000 }, cUserId);
+
+  const cJobTitle = uniq('C작업');
+  await clickAction(page, '[data-action="new-job"]');
+  await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+  await page.type('form[data-form="job"] input[name="title"]', cJobTitle);
+  await selectAction(page, 'form[data-form="job"] select[name="assignee_id"]', cUserId);
+  await Promise.all([
+    page.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
+    clickAction(page, 'form[data-form="job"] button.primary'),
+  ]);
+  await waitForQuiet(page);
+
+  await clickAction(page, '[data-action="admin"]');
+  await page.waitForSelector('.list-manage', { timeout: 5000 });
+  const rowInfo = await page.evaluate((name) => {
+    const li = Array.from(document.querySelectorAll('.list-manage li')).find((li) => li.querySelector('.name')?.textContent.includes(name));
+    if (!li) return null;
+    return { text: li.textContent, hasDeleteBtn: !!li.querySelector('button[data-action="user-delete"]') };
+  }, nameC);
+  assert.ok(rowInfo, `expected user ${nameC} listed in the admin modal`);
+  assert.ok(/받은/.test(rowInfo.text) && /보낸/.test(rowInfo.text), 'expected 받은/보낸 counts in the admin row');
+  assert.ok(rowInfo.hasDeleteBtn, 'expected a delete button for a non-self user');
+
+  await page.evaluate(() => { window.confirm = () => true; });
+  await clickAction(page, `.list-manage li button[data-action="user-delete"][data-name="${nameC}"]`);
+  await page.waitForFunction((name) => !Array.from(document.querySelectorAll('.list-manage li')).some((li) => li.querySelector('.name')?.textContent.includes(name)), { timeout: 15000 }, nameC);
+  await closeModalIfOpen(page);
+
+  // A's sent view now shows the job as assigned to "탈퇴자"
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
+  await page.waitForFunction((title) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === title);
+    return row?.querySelector('.meta')?.textContent.includes('탈퇴자');
+  }, { timeout: 15000 }, cJobTitle);
+  await clickAction(page, '[data-action="view"][data-view="queue"]');
+
+  // C's own page ends up signed out (their profile no longer exists) on its next reload
+  await pageC.reload({ waitUntil: 'networkidle0', timeout: 15000 });
+  await pageC.waitForSelector('.auth', { timeout: 15000 });
+  await pageC.close();
+  await contextC.close();
+});
+
+test('admin sees 삭제 on a job they neither requested nor are assigned, and can delete it', async () => {
+  const dTitle = uniq('작업D');
+  await closeModalIfOpen(pageB);
+  await clickAction(pageB, '[data-action="new-job"]');
+  await pageB.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+  await pageB.type('form[data-form="job"] input[name="title"]', dTitle);
+  await Promise.all([
+    pageB.waitForFunction(() => !document.getElementById('modal-root') || document.getElementById('modal-root').hidden, { timeout: 15000 }),
+    clickAction(pageB, 'form[data-form="job"] button.primary'),
+  ]);
+  await waitForQuiet(pageB);
+
+  await selectAction(page, 'select[data-action="assignee"]', bUserId);
+  await clickRow(page, dTitle);
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  const hasDelete = await page.evaluate(() => !!document.querySelector('[data-action="job-delete"]'));
+  assert.ok(hasDelete, 'expected admin to see a 삭제 button on a job they neither requested nor are assigned');
+
+  await page.evaluate(() => { window.confirm = () => true; });
+  await clickAction(page, '[data-action="job-delete"]');
+  await page.waitForFunction((title) => !Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title), { timeout: 15000 }, dTitle);
+  await selectAction(page, 'select[data-action="assignee"]', aUserId);
 });
 
 test('no unexpected console errors were captured', () => {

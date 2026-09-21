@@ -1,6 +1,6 @@
 import { createApi } from './src/api.js';
 import { validateName, translateAuthError, validateFiles } from './src/lib.js';
-import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm } from './src/ui.js';
+import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
 const client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
@@ -10,7 +10,7 @@ const root = document.getElementById('app');
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
   view: 'queue', assigneeId: null, projectFilter: 'all', authMode: 'login', authError: '',
-  openJobId: null, editingJobId: null,
+  openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
 
@@ -30,6 +30,7 @@ async function refresh() {
   try {
     Object.assign(state, await api.loadAll());
     state.me = state.profiles.find(p => p.id === state.session.user.id) || null;
+    if (!state.me) { await api.signOut(); return; }
     if (!state.assigneeId) state.assigneeId = state.session.user.id;
     setBanner(null);
   } catch (e) {
@@ -69,12 +70,16 @@ export function renderAll() {
   // entirely until the edit form itself is submitted or closed"; the app
   // shell behind it (_render(), above) still updates live.
   if (state.editingJobId) return;
-  if (!state.openJobId) return;
-  const j = curJob();
-  if (!j) { state.openJobId = null; closeModal(); return; }
-  if (modalHasDraft()) { pendingModalRefresh = true; return; }   // redraw later, after the form is submitted or blurred
-  pendingModalRefresh = false;
-  openModal(renderJobDetail(state, j, attUrls));
+  if (state.openJobId) {
+    const j = curJob();
+    if (!j) { state.openJobId = null; closeModal(); return; }
+    if (modalHasDraft()) { pendingModalRefresh = true; return; }   // redraw later, after the form is submitted or blurred
+    pendingModalRefresh = false;
+    openModal(renderJobDetail(state, j, attUrls));
+    return;
+  }
+  if (state.modal === 'projects') openModal(renderProjectsModal(state));
+  if (state.modal === 'admin') openModal(renderAdminModal(state));
 }
 document.getElementById('modal-root').addEventListener('focusout', () => {
   setTimeout(() => { if (pendingModalRefresh && !modalHasDraft()) renderAll(); }, 50);
@@ -85,10 +90,11 @@ export const actions = {
   'auth-mode': (el) => { state.authMode = el.dataset.mode; state.authError = ''; renderAll(); },
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
   'logout': async () => { await api.signOut(); },
-  'new-job': () => openModal(renderJobForm(state)),
+  'new-job': () => { state.modal = null; openModal(renderJobForm(state)); },
   // While editing (state.editingJobId set), 닫기/✕ should return to the
   // detail view rather than just closing the modal outright.
   'close-modal': () => {
+    state.modal = null;
     if (state.editingJobId) {
       const id = state.editingJobId;
       state.editingJobId = null;
@@ -97,7 +103,7 @@ export const actions = {
     state.openJobId = null;
     closeModal();
   },
-  'open-job': (el) => openJob(el.dataset.id),
+  'open-job': (el) => { state.modal = null; return openJob(el.dataset.id); },
   'job-start': async () => { await api.startJob(state.openJobId); toast('진행중으로 바꿨습니다'); },
   'job-done': () => { document.getElementById('inline-form').innerHTML = inlineForm('done', state, curJob()); },
   'job-reject': () => { document.getElementById('inline-form').innerHTML = inlineForm('reject', state, curJob()); },
@@ -106,10 +112,22 @@ export const actions = {
   // Capture the job before clearing openJobId — curJob() reads off
   // state.openJobId, which we're about to null out so a background
   // renderAll() can't touch the edit form (see renderAll()'s comment).
-  'job-edit': () => { const job = curJob(); state.editingJobId = job?.id ?? null; state.openJobId = null; openModal(renderJobForm(state, job)); },
+  'job-edit': () => { const job = curJob(); state.editingJobId = job?.id ?? null; state.openJobId = null; state.modal = null; openModal(renderJobForm(state, job)); },
   'job-delete': async () => { if (confirm('의뢰를 완전히 삭제할까요?')) { await api.deleteJob(state.openJobId); state.openJobId = null; closeModal(); toast('삭제했습니다'); } },
   'comment-delete': async (el) => { await api.deleteComment(el.dataset.id); },
   'att-delete': async (el) => { const a = state.attachments.find(x => x.id === el.dataset.id); if (a && confirm(`${a.filename} 삭제?`)) await api.deleteAttachment(a); },
+  'manage-projects': () => { state.openJobId = null; openModal(renderProjectsModal(state)); state.modal = 'projects'; },
+  'admin': () => { state.openJobId = null; openModal(renderAdminModal(state)); state.modal = 'admin'; },
+  'project-rename': async (el) => {
+    const name = prompt('새 이름', el.dataset.name);
+    if (name && name.trim() && name.trim() !== el.dataset.name) await api.renameProject(el.dataset.id, name.trim());
+  },
+  'project-delete': async (el) => {
+    if (confirm(`#${el.dataset.name} 키워드를 삭제할까요? 해당 의뢰는 #미분류로 이동합니다.`)) await api.deleteProject(el.dataset.id);
+  },
+  'user-delete': async (el) => {
+    if (confirm(`${el.dataset.name} 계정을 삭제할까요? 되돌릴 수 없습니다.`)) { await api.adminDeleteUser(el.dataset.id); toast('삭제했습니다'); }
+  },
 };
 export const changes = {
   'assignee': (el) => { state.assigneeId = el.value; renderAll(); },
@@ -185,6 +203,7 @@ forms['job'] = async (form) => {
   if (failed.length) toast(`첨부 실패: ${failed.join('; ')} — 상세 화면에서 다시 올릴 수 있습니다`, 'error');
 };
 function displayNameOf(id) { return state.profiles.find(p => p.id === id)?.name ?? '탈퇴자'; }
+forms['project-add'] = async (form) => { await api.addProject(String(new FormData(form).get('name')).trim()); form.reset(); };
 
 // Actions/changes/forms that write to the server without re-rendering
 // themselves — the delegated listeners below are responsible for the
@@ -196,9 +215,9 @@ function displayNameOf(id) { return state.profiles.find(p => p.id === id)?.name 
 // the project-filter <select>'s change event further down the test suite),
 // and (b) for job-edit specifically, re-open the read-only detail modal on
 // top of the edit form it just opened, since state.openJobId is still set.
-const MUTATING_ACTIONS = new Set(['job-start', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete']);
+const MUTATING_ACTIONS = new Set(['job-start', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete', 'project-rename', 'project-delete', 'user-delete']);
 const MUTATING_CHANGES = new Set(['att-upload']);
-const MUTATING_FORMS = new Set(['done', 'reject', 'handoff', 'comment']);
+const MUTATING_FORMS = new Set(['done', 'reject', 'handoff', 'comment', 'project-add']);
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');

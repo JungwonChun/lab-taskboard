@@ -205,6 +205,36 @@ export function inlineForm(kind, state, job) {
   return '';
 }
 
+export function renderProjectsModal(state) {
+  const items = state.projects.map(p => {
+    const n = state.jobs.filter(j => j.project_id === p.id).length;
+    const locked = p.id === UNCATEGORIZED_ID;
+    return `<li><span class="name">#${esc(p.name)} <span class="hint">(${n}건)</span></span>
+      ${locked ? '<span class="hint">고정</span>' : `<button data-action="project-rename" data-id="${p.id}" data-name="${esc(p.name)}">이름 변경</button><button class="danger" data-action="project-delete" data-id="${p.id}" data-name="${esc(p.name)}">삭제</button>`}</li>`;
+  }).join('');
+  return `
+  <button class="close" data-action="close-modal">✕</button>
+  <h3>프로젝트 키워드</h3>
+  <p class="hint">누구나 추가·변경·삭제할 수 있습니다. 삭제하면 그 키워드의 의뢰는 #미분류로 옮겨집니다.</p>
+  <ul class="list-manage">${items}</ul>
+  <form data-form="project-add" class="inline" style="margin-top:12px"><input name="name" required maxlength="40" placeholder="새 키워드"><button class="primary">추가</button></form>`;
+}
+
+export function renderAdminModal(state) {
+  const rows = state.profiles.map(p => {
+    const recv = state.jobs.filter(j => j.assignee_id === p.id).length;
+    const sent = state.jobs.filter(j => j.requester_id === p.id).length;
+    const self = p.id === state.me.id;
+    return `<li><span class="name">${esc(p.name)}${p.is_admin ? ' 👑' : ''} <span class="hint">가입 ${formatDateTime(p.created_at)} · 받은 ${recv} · 보낸 ${sent}</span></span>
+      ${self ? '<span class="hint">나</span>' : `<button class="danger" data-action="user-delete" data-id="${p.id}" data-name="${esc(p.name)}">삭제</button>`}</li>`;
+  }).join('');
+  return `
+  <button class="close" data-action="close-modal">✕</button>
+  <h3>관리</h3>
+  <p class="hint">사용자를 삭제해도 의뢰·댓글은 남고 이름만 "탈퇴자"로 표시됩니다. 비밀번호 초기화는 Supabase 대시보드 → Authentication → Users에서 합니다.</p>
+  <ul class="list-manage">${rows}</ul>`;
+}
+
 export function renderJobForm(state, job = null) {
   const { profiles, projects, me } = state;
   const v = job || { assignee_id: me.id, project_id: UNCATEGORIZED_ID, title: '', body: '', urgency: 3, deadline: null, seraph_path: '' };
