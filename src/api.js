@@ -75,6 +75,7 @@ export function createApi(client) {
     rejectJob: (id, reject_reason) => updateJob(id, { status: 'rejected', reject_reason }),
     handoffJob: (id, assignee_id) => updateJob(id, { status: 'waiting', assignee_id }),
     cancelJob: (id) => updateJob(id, { status: 'cancelled' }),
+    setEta: (id, eta) => updateJob(id, { eta: eta || null }),
     async deleteJob(id) {
       const data = must(await client.from('jobs').delete().eq('id', id).select('id'), '의뢰 삭제');
       if (!data.length) throw new Error('의뢰 삭제: 권한이 없습니다');

@@ -47,9 +47,17 @@ function hasRow(title) {
 // holds its session-recovery lock). Used wherever it's the simplest way to
 // get a guaranteed-fresh view of server state, instead of waiting on
 // realtime timing.
+// 첫 화면은 대시보드다. 큐를 다루는 테스트는 먼저 큐 탭으로 옮겨야 한다.
+async function gotoQueue(pageX) {
+  await pageX.waitForSelector('[data-action="view"][data-view="queue"]', { timeout: 10000 });
+  await clickAction(pageX, '[data-action="view"][data-view="queue"]');
+  await pageX.waitForSelector('select[data-action="assignee"]', { timeout: 10000 });
+}
+
 async function reloadAndWaitReady(pageX) {
   await pageX.reload({ waitUntil: 'networkidle0', timeout: 15000 });
   await pageX.waitForSelector('.topbar .me', { timeout: 15000 });
+  await gotoQueue(pageX);
 }
 
 // Every mutation in this app causes *two* re-renders of anything currently
@@ -213,6 +221,7 @@ test('sign up user A shows their name in the top bar', async () => {
   });
   if (uid) createdUserIds.push(uid);
   aUserId = uid;
+  await gotoQueue(page);
 });
 
 test('reload while logged in still shows the queue', async () => {
@@ -390,6 +399,7 @@ test('sign up user B in a separate browser context', async () => {
     return data.session?.user?.id ?? null;
   });
   if (bUserId) createdUserIds.push(bUserId);
+  await gotoQueue(pageB);
 
   // A's page needs B's profile row (for the assignee <select>) before it can
   // create a job for B. Reload is simple and reliable now (see the
@@ -1104,6 +1114,66 @@ test('키워드는 담당자 소유: B의 키워드는 B를 담당자로 골랐�
   const forA = await optionsFor(aUserId);
   assert.ok(!forA.includes(keyword), `expected ${keyword} to be hidden when A is the assignee, got ${forA.join(',')}`);
   assert.ok(forA.includes('미분류'), 'expected 미분류 to stay available for everyone');
+});
+
+test('대시보드: 첫 화면에 쌓여있는 일·진행중·총 처리량이 뜨고, 큐 보기로 이동한다', async () => {
+  await closeModalIfOpen(page);
+  await clickAction(page, '[data-action="view"][data-view="dashboard"]');
+  await page.waitForSelector('.tiles .tile', { timeout: 10000 });
+
+  const labels = await page.$$eval('.tiles .tile-label', (els) => els.map((e) => e.textContent));
+  assert.deepEqual(labels.slice(0, 3), ['쌓여있는 일', '진행중', '총 처리량']);
+
+  const shown = await page.$$eval('.tiles .tile-value', (els) => els.slice(0, 3).map((e) => Number(e.textContent)));
+  assert.ok(shown.every((n) => Number.isInteger(n) && n >= 0), `expected integer tile values, got ${shown}`);
+  // 이 스위트가 만든 일이 있으므로 완료 건수는 0보다 커야 한다.
+  assert.ok(shown[2] > 0, `expected a non-zero 총 처리량, got ${shown[2]}`);
+
+  // 사람별 표의 대기/진행중 합계가 위 타일과 맞아야 한다.
+  const sums = await page.$$eval('table.stats tbody tr', (rows) => {
+    let waiting = 0, inprog = 0;
+    for (const r of rows) {
+      const tds = r.querySelectorAll('td');
+      waiting += Number(tds[1].textContent);
+      inprog += Number(tds[2].textContent);
+    }
+    return { waiting, inprog };
+  });
+  // 미배정 건은 사람별 표에 없으므로 타일이 표 합계 이상이어야 한다.
+  assert.ok(shown[0] >= sums.waiting, `waiting tile ${shown[0]} < table sum ${sums.waiting}`);
+  assert.ok(shown[1] >= sums.inprog, `in-progress tile ${shown[1]} < table sum ${sums.inprog}`);
+
+  // 큐 보기 → 그 사람의 큐로 이동
+  await clickAction(page, 'table.stats tbody tr button[data-action="goto-queue"]');
+  await page.waitForSelector('select[data-action="assignee"]', { timeout: 10000 });
+  const heading = await page.$eval('main h2', (el) => el.textContent);
+  assert.match(heading, /의 큐|미배정 큐/);
+});
+
+test('예상 마무리 시간: 담당자가 저장하면 큐 줄에 🏁 로 뜬다', async () => {
+  const title = uniq('예상시각');
+  await closeModalIfOpen(page);
+  await createJobForB(title);
+  await openAsB(title);
+
+  await clickAction(pageB, '[data-action="job-eta"]');
+  await pageB.waitForSelector('form[data-form="eta"] input[name="eta"]', { timeout: 5000 });
+  const when = new Date(Date.now() + 3 * 86400000);
+  const pad = (n) => String(n).padStart(2, '0');
+  const local = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T09:30`;
+  await pageB.$eval('form[data-form="eta"] input[name="eta"]', (el, v) => { el.value = v; }, local);
+  await clickAction(pageB, 'form[data-form="eta"] button.primary');
+  await pageB.waitForFunction(
+    () => /예상 마무리/.test(document.querySelector('.modal .kv')?.textContent || '')
+       && !/미정/.test(Array.from(document.querySelectorAll('.modal .kv dd')).map((d) => d.textContent).join('|')),
+    { timeout: 15000 });
+
+  await closeModalIfOpen(pageB);
+  const expected = `🏁 예상 ${when.getMonth() + 1}/${when.getDate()} 09:30`;
+  await pageB.waitForFunction((t, want) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === t);
+    return row?.querySelector('.eta')?.textContent.trim() === want;
+  }, { timeout: 15000 }, title, expected);
 });
 
 test('no unexpected console errors were captured', () => {

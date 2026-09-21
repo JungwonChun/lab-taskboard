@@ -29,11 +29,11 @@ export function renderShell(state, mainHtml) {
   return `
   <header class="topbar">
     <span class="brand">Lab Taskboard</span>
+    <button class="tab ${view === 'dashboard' ? 'active' : ''}" data-action="view" data-view="dashboard">대시보드</button>
     <button class="tab ${view === 'queue' ? 'active' : ''}" data-action="view" data-view="queue">큐</button>
     <button class="tab ${view === 'sent' ? 'active' : ''}" data-action="view" data-view="sent">보낸 의뢰</button>
     ${view === 'queue' ? `<select data-action="assignee">${people}</select>` : ''}
-    <select data-action="project-filter"><option value="all" ${projectFilter === 'all' ? 'selected' : ''}>전체 프로젝트</option>${projs}</select>
-    <button class="primary" data-action="new-job">+ 새 의뢰</button>
+    ${view === 'dashboard' ? '' : `<select data-action="project-filter"><option value="all" ${projectFilter === 'all' ? 'selected' : ''}>전체 프로젝트</option>${projs}</select>`}
     <button data-action="manage-projects">키워드 관리</button>
     ${me.is_admin ? '<button data-action="admin">관리</button>' : ''}
     <span class="spacer"></span>
@@ -97,7 +97,8 @@ export function jobRow(job, state, { showPos = true, showAssignee = false } = {}
     </div>
     <div class="right">
       <span class="badge ${job.status}">${STATUS_LABELS[job.status]}</span>
-      ${job.deadline ? `<span class="deadline ${over ? 'over' : ''}">⏰ ${formatDateTime(job.deadline)}</span>` : ''}
+      ${job.deadline ? `<span class="deadline ${over ? 'over' : ''}">⏰ 마감 ${formatShort(job.deadline)}</span>` : ''}
+      ${job.eta && isOpen(job) ? `<span class="eta">🏁 예상 ${formatShort(job.eta)}</span>` : ''}
     </div>
   </div>`;
 }
@@ -106,13 +107,50 @@ function applyProjectFilter(jobs, state) {
   return state.projectFilter === 'all' ? jobs : jobs.filter(j => j.project_id === state.projectFilter);
 }
 
+// 대시보드: 개수를 읽는 화면이라 차트가 아니라 숫자 타일 + 표가 맞는 형태다.
+export function renderDashboard(state) {
+  const st = dashboardStats(state.jobs, state.profiles);
+  const tile = (label, value, note, kind) => `
+    <div class="tile ${kind || ''}">
+      <div class="tile-value">${value}</div>
+      <div class="tile-label">${esc(label)}</div>
+      ${note ? `<div class="tile-note">${esc(note)}</div>` : ''}
+    </div>`;
+  const rows = st.perPerson.map((r) => `
+    <tr>
+      <td>${esc(r.name)}</td>
+      <td class="num">${r.waiting}</td>
+      <td class="num">${r.in_progress}</td>
+      <td class="num">${r.done}</td>
+      <td class="num ${r.overdue ? 'over' : ''}">${r.overdue || '·'}</td>
+      <td><button data-action="goto-queue" data-id="${r.id}">큐 보기</button></td>
+    </tr>`).join('');
+  return `
+  <div class="head-row"><h2>대시보드</h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>
+  <div class="tiles">
+    ${tile('쌓여있는 일', st.waiting, '아직 손대지 않은 대기 건')}
+    ${tile('진행중', st.in_progress, '지금 누군가 붙잡고 있는 일')}
+    ${tile('총 처리량', st.done, '지금까지 완료된 누적 건수')}
+  </div>
+  <div class="tiles small">
+    ${tile('마감 지남', st.overdue, '열려 있는데 마감이 지난 건', st.overdue ? 'warn' : '')}
+    ${tile('반려', st.rejected, '')}
+    ${tile('미배정', st.unassigned, '담당자가 없는 열린 건', st.unassigned ? 'warn' : '')}
+  </div>
+  <h2>사람별 현황</h2>
+  ${rows ? `<div class="table-wrap"><table class="stats">
+    <thead><tr><th>이름</th><th class="num">대기</th><th class="num">진행중</th><th class="num">완료</th><th class="num">마감 지남</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>` : '<div class="empty">아직 의뢰가 없습니다</div>'}`;
+}
+
 export function renderQueue(state) {
   const unassigned = state.assigneeId === null;
   const heading = unassigned ? '미배정 큐' : `${esc(displayName(state.assigneeId, state.profiles))}의 큐`;
   const open = applyProjectFilter(sortQueue(state.jobs, state.assigneeId), state);
   const past = applyProjectFilter(sortPast(state.jobs, state.assigneeId), state);
   return `
-  <h2>${heading} <span class="hint">(${open.length}건 · 들어온 순서)</span></h2>
+  <div class="head-row"><h2>${heading} <span class="hint">(${open.length}건 · 들어온 순서)</span></h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>
   <div class="rows">${open.length ? open.map(j => jobRow(j, state)).join('') : '<div class="empty">대기 중인 일이 없습니다</div>'}</div>
   <details class="past"><summary>지난 일 ${past.length}건</summary>
     <div class="rows">${past.map(j => jobRow(j, state, { showPos: false })).join('')}</div>
@@ -124,7 +162,7 @@ export function renderSent(state) {
   const open = mine.filter(j => ['waiting', 'in_progress'].includes(j.status)).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
   const past = mine.filter(j => !['waiting', 'in_progress'].includes(j.status)).sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)));
   return `
-  <h2>내가 보낸 의뢰 <span class="hint">(진행 중 ${open.length}건)</span></h2>
+  <div class="head-row"><h2>내가 보낸 의뢰 <span class="hint">(진행 중 ${open.length}건)</span></h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>
   <div class="rows">${open.length ? open.map(j => jobRow(j, state, { showAssignee: true })).join('') : '<div class="empty">보낸 의뢰가 없습니다</div>'}</div>
   <details class="past"><summary>지난 의뢰 ${past.length}건</summary>
     <div class="rows">${past.map(j => jobRow(j, state, { showPos: false, showAssignee: true })).join('')}</div>
@@ -173,7 +211,7 @@ export function renderJobDetail(state, job, urls = {}) {
 
   const manage = [];
   if ((isReq || isAdmin) && job.status === 'waiting') manage.push('<button data-action="job-edit">내용 수정</button>', '<button class="danger" data-action="job-cancel">의뢰 취소</button>');
-  if (canStatus) manage.push('<button data-action="job-handoff">담당자 넘기기</button>');
+  if (canStatus) manage.push('<button data-action="job-eta">예상 마무리 시간</button>', '<button data-action="job-handoff">담당자 넘기기</button>');
   if (isAdmin) manage.push('<button class="danger" data-action="job-delete">삭제</button>');
 
   return `
@@ -185,6 +223,7 @@ export function renderJobDetail(state, job, urls = {}) {
     <dt>프로젝트</dt><dd>#${esc(projectName(job.project_id, projects))}</dd>
     <dt>의뢰 → 담당</dt><dd>${esc(displayName(job.requester_id, profiles))} → ${esc(displayName(job.assignee_id, profiles))}</dd>
     <dt>마감</dt><dd class="${isOverdue(job) ? 'deadline over' : ''}">${job.deadline ? formatDateTime(job.deadline) : '없음'}</dd>
+    <dt>예상 마무리</dt><dd>${job.eta ? formatDateTime(job.eta) : '미정'}</dd>
     <dt>생성</dt><dd>${formatDateTime(job.created_at)}</dd>
     ${job.started_at ? `<dt>시작</dt><dd>${formatDateTime(job.started_at)}</dd>` : ''}
     ${job.finished_at ? `<dt>종료</dt><dd>${formatDateTime(job.finished_at)}</dd>` : ''}
@@ -214,6 +253,10 @@ export function renderJobDetail(state, job, urls = {}) {
 export function inlineForm(kind, state, job) {
   if (kind === 'done') return `<form data-form="done"><label>완료 메모 (선택)</label><textarea name="result_note"></textarea><div class="actions"><button class="primary">완료 처리</button></div></form>`;
   if (kind === 'reject') return `<form data-form="reject"><label>반려 사유 *</label><textarea name="reject_reason" required></textarea><div class="actions"><button class="danger">반려</button></div></form>`;
+  if (kind === 'eta') {
+    const cur = job.eta ? toLocalInput(job.eta) : '';
+    return `<form data-form="eta"><label>예상 마무리 (담당자가 적습니다)</label><input type="datetime-local" name="eta" value="${cur}"><div class="actions"><button class="primary">저장</button><button type="button" data-action="job-eta-clear">지우기</button></div></form>`;
+  }
   if (kind === 'handoff') {
     const people = state.profiles.filter(p => p.id !== job.assignee_id).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
     return `<form data-form="handoff"><label>넘길 사람</label><select name="assignee_id">${people}</select><div class="actions"><button class="primary">넘기기 (그 사람 큐 맨 뒤로)</button></div></form>`;

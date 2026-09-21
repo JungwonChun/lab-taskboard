@@ -26,33 +26,40 @@
 - 내부적으로 이름을 `u-<utf8 hex>@board.local` 가짜 이메일로, 비밀번호는 `nameToPassword(name)` 로 이름에서 결정적으로 만들어 Supabase Auth에 넣는다. 이메일 확인은 프로젝트 설정에서 끈다.
 - **보안 한계(사용자가 알고 선택함):** 비밀번호 파생 규칙이 공개 스크립트에 있으므로, 주소와 이름을 아는 사람은 누구나 그 계정으로 들어올 수 있다. 민감한 내용을 올리지 않는다는 전제로 운영한다. 로그인 화면에 이 경고를 표시한다.
 
-### 2.2 메인 (한 사람의 큐)
+### 2.2 대시보드 (첫 화면)
+- 로그인하면 처음 보이는 화면. 숫자를 읽는 화면이라 차트가 아니라 숫자 타일 + 표로 만든다.
+- 큰 타일 3개: **쌓여있는 일**(status=waiting 전체), **진행중**(in_progress 전체), **총 처리량**(done 누적).
+- 작은 타일 3개: 마감 지남(열려 있는데 마감 초과), 반려, 미배정(담당자 없는 열린 건). 0이 아니면 빨간 숫자.
+- 사람별 표: 이름 · 대기 · 진행중 · 완료 · 마감 지남 · `큐 보기` 버튼. 열린 일(대기+진행중)이 많은 순으로 정렬하고, 아무 일도 없는 사람은 빼놓는다. `큐 보기`를 누르면 그 사람의 큐로 이동한다.
+- 상단 바에서 사람 선택과 프로젝트 필터는 이 화면에서 숨긴다.
+
+### 2.3 큐 (한 사람의 큐)
 - 상단 바: 로고, 사람 선택(기본 = 나), 프로젝트 필터(전체/각 키워드), `새 의뢰` 버튼, `보낸 의뢰` 탭, `키워드 관리`, 관리자면 `관리`, 내 이름 + 로그아웃.
 - 목록: 선택된 사람이 담당자인 의뢰 중 상태가 대기·진행중인 것을 `queued_at` 오름차순으로.
-  각 행: 순번, 긴급도 이모지, 제목, 프로젝트, 의뢰자, 마감(지났으면 빨간 배경), 상태 배지, 첨부 개수.
+  각 행: 순번, 긴급도 이모지, 제목, 프로젝트, 의뢰자, 마감(⏰, 지났으면 빨간 배경), **예상 마무리(🏁, 담당자가 적은 값, 열린 일에만)**, 상태 배지, 첨부 개수. 날짜는 `월/일 시:분` 짧은 형식.
 - 아래에 접힌 "지난 일": 완료·반려·취소 건, `finished_at` 내림차순.
 - 실시간: jobs/comments 변경 구독으로 자동 갱신.
 
-### 2.3 보낸 의뢰
+### 2.4 보낸 의뢰
 - 내가 의뢰자인 건 전부, 진행 중인 것 먼저, 그다음 지난 것. 각 행에 담당자·현재 순번·상태.
 
-### 2.4 의뢰 상세 (모달)
+### 2.5 의뢰 상세 (모달)
 - 표시: 제목, 프로젝트, 의뢰자 → 담당자, 긴급도, 마감, 생성 시각, 내용, 의뢰 첨부, seraph 경로, 상태, 반려 사유, 완료 메모, 결과 첨부, 댓글 스레드(작성자·시각·내용, 아래 입력창).
 - 버튼은 두 묶음이다.
   - **진행상황**(담당자·관리자): `대기` `진행중` `완료` `반려` 네 개가 현재 상태와 무관하게 항상 뜨고 항상 눌린다. 현재 상태인 버튼만 강조된다. 완료는 메모·결과 파일을 함께 받고, 반려는 사유가 필수다.
-  - **의뢰 관리**: `내용 수정`·`의뢰 취소`(의뢰자, 대기 상태만), `담당자 넘기기`(담당자·관리자; 담당자 변경 후 상태 대기, `queued_at` 갱신), `삭제`(관리자).
+  - **의뢰 관리**: `내용 수정`·`의뢰 취소`(의뢰자, 대기 상태만), `예상 마무리 시간`(담당자·관리자; datetime-local 입력, 비우면 삭제), `담당자 넘기기`(담당자·관리자; 담당자 변경 후 상태 대기, `queued_at` 갱신), `삭제`(관리자).
 - 댓글 삭제: 본인 또는 관리자.
 
-### 2.5 새 의뢰 / 수정 폼
+### 2.6 새 의뢰 / 수정 폼
 - 담당자(필수, 사용자 목록), 프로젝트(필수, **선택된 담당자의 키워드만** 목록에 뜨고 담당자를 바꾸면 즉시 갱신됨; "새 키워드" 입력 시 그 담당자 소유로 생성; 기본 "미분류"), 제목(필수), 내용(선택), 긴급도 1~5(기본 3), 마감 날짜+시각(선택), 첨부(선택, 여러 개, 각 20MB 이하), seraph 경로(선택, 텍스트).
 - 긴급도 이모지: 1 😌 · 2 🙂 · 3 😐 · 4 😟 · 5 🥵.
 
-### 2.6 키워드 관리
+### 2.7 키워드 관리
 - 상단에서 선택한 사람의 키워드만 보여준다(제목 `<이름>의 프로젝트 키워드`). 추가하면 그 사람 소유가 된다.
 - 이름 변경·삭제는 주인(`owner_id`)과 관리자만. 남의 키워드에는 "주인만 수정할 수 있습니다" 안내만 뜬다. "미분류"는 변경·삭제 불가.
 - 삭제 시 해당 프로젝트의 의뢰는 DB가 "미분류"로 옮긴다.
 
-### 2.7 관리자
+### 2.8 관리자
 - 사용자 목록(이름, 가입일, 받은/보낸 건수), 사용자 삭제(그 사람의 의뢰는 남고 이름은 "탈퇴자"로 표시).
 - 비밀번호 초기화는 Supabase 대시보드 Auth 화면에서 수동. 화면에 안내 문구만 둔다.
 
@@ -67,7 +74,7 @@ jobs          id uuid PK,
               project_id uuid -> projects ON DELETE SET DEFAULT (DEFAULT = 미분류 id),
               title text NOT NULL, body text DEFAULT '',
               urgency int CHECK 1..5 DEFAULT 3,
-              deadline timestamptz NULL, seraph_path text DEFAULT '',
+              deadline timestamptz NULL, eta timestamptz NULL (담당자만 수정), seraph_path text DEFAULT '',
               status text CHECK IN ('waiting','in_progress','done','rejected','cancelled') DEFAULT 'waiting',
               reject_reason text DEFAULT '', result_note text DEFAULT '',
               created_at, queued_at (기본 now), started_at NULL, finished_at NULL
@@ -96,7 +103,7 @@ comments      id uuid PK, job_id -> jobs ON DELETE CASCADE, author_id, body text
 
 jobs update 정책은 `can_update_job(old, new)` 함수 한 곳에서 판정한다.
 - 관리자: 모두 허용.
-- 의뢰자이고 old.status = waiting: title/body/urgency/deadline/seraph_path/project_id/assignee_id 수정 허용, status는 waiting→cancelled만 허용. assignee 변경 시 queued_at 갱신은 트리거.
+- 의뢰자이고 old.status = waiting: title/body/urgency/deadline/seraph_path/project_id/assignee_id 수정 허용(eta 는 거부), status는 waiting→cancelled만 허용. assignee 변경 시 queued_at 갱신은 트리거.
 - 담당자: status 를 waiting·in_progress·done·rejected 중 아무것이나, 현재 상태와 무관하게 지정 가능(cancelled 는 거부). rejected 는 reject_reason 이 비어 있으면 거부. 넘기기는 assignee 변경(queued_at = now). 그 외 필드 변경 불가. 타임스탬프: in_progress 진입 시 started_at=now·finished_at=null, 종료 상태 진입/변경 시 finished_at=now, waiting 복귀 시 둘 다 null.
 - 그 밖의 사용자: 거부.
 

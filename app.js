@@ -1,6 +1,6 @@
 import { createApi } from './src/api.js';
 import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID, nameToPassword } from './src/lib.js';
-import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal, projectOptions, projectsFor } from './src/ui.js';
+import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal, projectOptions, projectsFor, renderDashboard } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
 const client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'queue', assigneeId: undefined, projectFilter: 'all', authError: '',
+  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -57,6 +57,7 @@ function onRealtimeStatus(status) {
 }
 
 export function renderMain() {
+  if (state.view === 'dashboard') return renderDashboard(state);
   return state.view === 'sent' ? renderSent(state) : renderQueue(state);
 }
 
@@ -126,6 +127,14 @@ export const actions = {
   'job-done': () => { document.getElementById('inline-form').innerHTML = inlineForm('done', state, curJob()); },
   'job-reject': () => { document.getElementById('inline-form').innerHTML = inlineForm('reject', state, curJob()); },
   'job-handoff': () => { document.getElementById('inline-form').innerHTML = inlineForm('handoff', state, curJob()); },
+  'job-eta': () => { document.getElementById('inline-form').innerHTML = inlineForm('eta', state, curJob()); },
+  'job-eta-clear': async () => { await api.setEta(state.openJobId, null); toast('예상 마무리를 지웠습니다'); },
+  'goto-queue': (el) => {
+    state.view = 'queue';
+    state.assigneeId = el.dataset.id;
+    state.projectFilter = 'all';
+    renderAll();
+  },
   'job-cancel': async () => { if (confirm('이 의뢰를 취소할까요?')) { await api.cancelJob(state.openJobId); toast('취소했습니다'); } },
   // Capture the job before clearing openJobId — curJob() reads off
   // state.openJobId, which we're about to null out so a background
@@ -205,6 +214,11 @@ export const forms = {
   // permanently, since nothing else ever asks it to look again.
   'done': async (form) => { await api.finishJob(state.openJobId, String(new FormData(form).get('result_note') || '')); form.reset(); toast('완료 처리했습니다'); },
   'reject': async (form) => { await api.rejectJob(state.openJobId, String(new FormData(form).get('reject_reason') || '').trim()); form.reset(); toast('반려했습니다'); },
+  'eta': async (form) => {
+    const v = new FormData(form).get('eta');
+    await api.setEta(state.openJobId, v ? new Date(v).toISOString() : null);
+    toast(v ? '예상 마무리를 저장했습니다' : '예상 마무리를 지웠습니다');
+  },
   'handoff': async (form) => { await api.handoffJob(state.openJobId, new FormData(form).get('assignee_id')); toast('넘겼습니다'); },
   'comment': async (form) => { await api.addComment(state.openJobId, String(new FormData(form).get('body')).trim()); form.reset(); },
 };
@@ -258,9 +272,9 @@ forms['project-add'] = async (form) => { await api.addProject(String(new FormDat
 // the project-filter <select>'s change event further down the test suite),
 // and (b) for job-edit specifically, re-open the read-only detail modal on
 // top of the edit form it just opened, since state.openJobId is still set.
-const MUTATING_ACTIONS = new Set(['job-start', 'job-wait', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete', 'project-rename', 'project-delete', 'user-delete']);
+const MUTATING_ACTIONS = new Set(['job-start', 'job-wait', 'job-eta-clear', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete', 'project-rename', 'project-delete', 'user-delete']);
 const MUTATING_CHANGES = new Set(['att-upload']);
-const MUTATING_FORMS = new Set(['done', 'reject', 'handoff', 'comment', 'project-add']);
+const MUTATING_FORMS = new Set(['eta', 'done', 'reject', 'handoff', 'comment', 'project-add']);
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');

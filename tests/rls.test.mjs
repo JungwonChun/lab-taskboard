@@ -84,6 +84,18 @@ test('assignee may change status freely in any direction, but cannot cancel', as
   await assert.rejects(apiB.cancelJob(job.id), (e) => e.code === '42501');  // 취소는 의뢰자 전용
 });
 
+test('예상 마무리(eta)는 담당자만 적을 수 있다', async () => {
+  const { B, apiA, apiB } = await pair();
+  const job = await apiA.createJob({ assignee_id: B.user.id, title: '예상시간' });
+  assert.equal(job.eta, null);
+  const iso = new Date(Date.now() + 86400000).toISOString();
+  await assert.rejects(apiA.updateJob(job.id, { eta: iso }), (e) => e.code === '42501');
+  const set = await apiB.setEta(job.id, iso);
+  assert.equal(new Date(set.eta).toISOString(), iso);
+  const cleared = await apiB.setEta(job.id, null);
+  assert.equal(cleared.eta, null);
+});
+
 test('keyword ownership: only the owner or an admin may rename or delete', async () => {
   const { A, B, apiA, apiB } = await pair();
   const proj = await apiA.addProject(uniq('소유'), B.user.id);   // B 소유로 생성

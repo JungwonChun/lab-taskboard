@@ -103,3 +103,35 @@ export function displayName(profileId, profiles) {
   const p = profileId && profiles.find(x => x.id === profileId);
   return p ? p.name : '탈퇴자';
 }
+
+// ───────── 대시보드 집계 ─────────
+// 큐에 쌓인 일(대기), 손에 잡은 일(진행중), 끝낸 일(완료) 세 가지가 핵심 숫자다.
+export function dashboardStats(jobs, profiles) {
+  const count = (f) => jobs.filter(f).length;
+  const now = new Date();
+  const perPerson = profiles.map((p) => ({
+    id: p.id,
+    name: p.name,
+    waiting: count((j) => j.assignee_id === p.id && j.status === 'waiting'),
+    in_progress: count((j) => j.assignee_id === p.id && j.status === 'in_progress'),
+    done: count((j) => j.assignee_id === p.id && j.status === 'done'),
+    overdue: count((j) => j.assignee_id === p.id && isOverdue(j, now)),
+  })).filter((r) => r.waiting + r.in_progress + r.done + r.overdue > 0);
+  perPerson.sort((a, b) => (b.waiting + b.in_progress) - (a.waiting + a.in_progress) || a.name.localeCompare(b.name));
+  return {
+    waiting: count((j) => j.status === 'waiting'),
+    in_progress: count((j) => j.status === 'in_progress'),
+    done: count((j) => j.status === 'done'),
+    rejected: count((j) => j.status === 'rejected'),
+    overdue: count((j) => isOverdue(j, now)),
+    unassigned: count((j) => j.assignee_id == null && isOpen(j)),
+    perPerson,
+  };
+}
+
+// 큐 줄에 쓰는 짧은 날짜: "9/21 15:00"
+export function formatShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}

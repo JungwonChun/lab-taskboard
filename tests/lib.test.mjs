@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   nameToPassword,
+  dashboardStats,
+  formatShort,
   MAX_FILE_BYTES, UNCATEGORIZED_ID, URGENCY_EMOJI, STATUS_LABELS,
   validateName, nameToEmail, emailToName, isOpen, isOverdue,
   sortQueue, sortPast, queuePosition, validateFiles, formatDateTime,
@@ -131,4 +133,34 @@ test('displayName falls back to 탈퇴자', () => {
   assert.equal(displayName(P.a, profiles), '천정원');
   assert.equal(displayName(P.b, profiles), '탈퇴자');
   assert.equal(displayName(null, profiles), '탈퇴자');
+});
+
+test('formatShort renders 월/일 시:분', () => {
+  assert.equal(formatShort(null), '');
+  assert.match(formatShort('2026-09-21T06:05:00Z'), /^\d{1,2}\/\d{1,2} \d{2}:\d{2}$/);
+});
+
+test('dashboardStats counts the piles and ranks people by open load', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-00000000000a';
+  const B = 'aaaaaaaa-0000-0000-0000-00000000000b';
+  const j = (over) => ({ id: over.id, requester_id: A, assignee_id: A, status: 'waiting',
+    queued_at: '2026-09-21T00:00:00Z', finished_at: null, deadline: null, ...over });
+  const jobs = [
+    j({ id: '1' }), j({ id: '2' }),
+    j({ id: '3', status: 'in_progress' }),
+    j({ id: '4', status: 'done' }),
+    j({ id: '5', status: 'rejected' }),
+    j({ id: '6', assignee_id: B, status: 'waiting', deadline: '2000-01-01T00:00:00Z' }),
+    j({ id: '7', assignee_id: null }),
+  ];
+  const st = dashboardStats(jobs, [{ id: A, name: '가' }, { id: B, name: '나' }]);
+  assert.equal(st.waiting, 4);
+  assert.equal(st.in_progress, 1);
+  assert.equal(st.done, 1);
+  assert.equal(st.rejected, 1);
+  assert.equal(st.overdue, 1);
+  assert.equal(st.unassigned, 1);
+  assert.deepEqual(st.perPerson.map(p => p.name), ['가', '나']);   // 가: 3 open, 나: 1 open
+  assert.equal(st.perPerson[0].waiting, 2);
+  assert.equal(st.perPerson[1].overdue, 1);
 });

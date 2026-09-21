@@ -79,3 +79,35 @@ details.past summary { cursor: pointer; color: var(--muted); margin: 16px 0 8px;
   .row .right { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; }
   .kv { grid-template-columns: 1fr; }
 }
+
+/* ───── 대시보드 ───── */
+/* 개수를 읽는 화면이라 차트가 아니라 숫자 타일 + 표. 색은 상태색을 그대로 쓰되
+   항상 글자 라벨이 같이 붙어서, 색만으로 의미를 나르지 않는다. */
+.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 4px; }
+.tile { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.tile-value { font-size: 34px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile-label { font-size: 13px; font-weight: 600; margin-top: 4px; }
+.tile-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.tiles.small .tile { padding: 12px 14px; }
+.tiles.small .tile-value { font-size: 22px; }
+.tile.warn .tile-value { color: var(--danger); }
+
+.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+table.stats { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.stats th, table.stats td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.stats th { font-weight: 600; color: var(--muted); font-size: 12px; }
+table.stats tr:last-child td { border-bottom: none; }
+table.stats .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.stats td.num.over { color: var(--danger); font-weight: 700; }
+table.stats td button { padding: 3px 10px; font-size: 12px; }
+
+.row .eta { color: var(--ok); }
+
+@media (max-width: 640px) {
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .tiles.small { grid-template-columns: 1fr 1fr 1fr; }
+}
+
+/* 제목 줄 오른쪽에 붙는 기본 동작 버튼 (새 의뢰) */
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head-row h2 { margin: 18px 0 8px; }

@@ -32,6 +32,8 @@ create table if not exists public.jobs (
   body text not null default '',
   urgency int not null default 3 check (urgency between 1 and 5),
   deadline timestamptz,
+  -- eta = 담당자가 적는 예상 마무리 시각. 의뢰자는 못 건드린다.
+  eta timestamptz,
   seraph_path text not null default '',
   status text not null default 'waiting'
     check (status in ('waiting','in_progress','done','rejected','cancelled')),
@@ -42,6 +44,7 @@ create table if not exists public.jobs (
   started_at timestamptz,
   finished_at timestamptz
 );
+alter table public.jobs add column if not exists eta timestamptz;
 create index if not exists jobs_queue_idx on public.jobs (assignee_id, status, queued_at);
 
 create table if not exists public.attachments (
@@ -116,6 +119,7 @@ begin
   new.finished_at := null;
   new.reject_reason := '';
   new.result_note := '';
+  new.eta := null;
   return new;
 end $$;
 drop trigger if exists jobs_before_insert on public.jobs;
@@ -133,7 +137,8 @@ begin
     null;
   elsif uid = old.requester_id and old.status = 'waiting' and new.status in ('waiting','cancelled') then
     if new.reject_reason <> old.reject_reason or new.result_note <> old.result_note
-       or new.requester_id is distinct from old.requester_id then
+       or new.requester_id is distinct from old.requester_id
+       or new.eta is distinct from old.eta then
       raise exception 'requester may not change that field' using errcode = '42501';
     end if;
   elsif uid = old.assignee_id then
