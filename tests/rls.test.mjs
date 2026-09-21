@@ -46,7 +46,7 @@ test('requester creates job → assignee queue position 1; requester cannot star
   const job = await apiA.createJob({ assignee_id: B.user.id, title: '첫 일', urgency: 4 });
   assert.equal(job.status, 'waiting');
   assert.equal(job.requester_id, A.user.id);
-  await assert.rejects(apiA.startJob(job.id), /not allowed|invalid status|42501/i);
+  await assert.rejects(apiA.startJob(job.id), (e) => e.code === '42501');
   const started = await apiB.startJob(job.id);
   assert.equal(started.status, 'in_progress');
   assert.ok(started.started_at);
@@ -60,7 +60,7 @@ test('assignee: done allowed; rejected without reason refused; reason required',
   assert.equal(done.result_note, '결과 메모');
   assert.ok(done.finished_at);
   const j2 = await apiA.createJob({ assignee_id: B.user.id, title: '반려될 일' });
-  await assert.rejects(apiB.rejectJob(j2.id, '   '), /reject_reason|23514/i);
+  await assert.rejects(apiB.rejectJob(j2.id, '   '), (e) => e.code === '23514');
   const rej = await apiB.rejectJob(j2.id, '범위 밖');
   assert.equal(rej.status, 'rejected');
   assert.equal(rej.reject_reason, '범위 밖');
@@ -71,10 +71,10 @@ test('requester may edit/cancel only while waiting; assignee may not edit conten
   const job = await apiA.createJob({ assignee_id: B.user.id, title: '수정 전' });
   const edited = await apiA.updateJob(job.id, { title: '수정 후', urgency: 5 });
   assert.equal(edited.title, '수정 후');
-  await assert.rejects(apiB.updateJob(job.id, { title: '담당자 수정' }), /assignee may only|42501/i);
+  await assert.rejects(apiB.updateJob(job.id, { title: '담당자 수정' }), (e) => e.code === '42501');
   await apiB.startJob(job.id);
-  await assert.rejects(apiA.updateJob(job.id, { title: '진행중 수정' }), /not allowed|42501/i);
-  await assert.rejects(apiA.cancelJob(job.id), /not allowed|42501/i);
+  await assert.rejects(apiA.updateJob(job.id, { title: '진행중 수정' }), (e) => e.code === '42501');
+  await assert.rejects(apiA.cancelJob(job.id), (e) => e.code === '42501');
   const j2 = await apiA.createJob({ assignee_id: B.user.id, title: '취소될 일' });
   const cancelled = await apiA.cancelJob(j2.id);
   assert.equal(cancelled.status, 'cancelled');
@@ -156,9 +156,20 @@ test('attachments: requester uploads request file while waiting; assignee upload
   assert.equal((left || []).length, 0, 'storage object must be removed too');
 });
 
+test('a normal user cannot self-promote via profiles update (no update policy)', async () => {
+  const { A } = await pair();
+  const before = await admin().from('profiles').select('is_admin').eq('id', A.user.id).single();
+  assert.equal(before.data.is_admin, false);
+  const res = await A.client.from('profiles').update({ is_admin: true }).eq('id', A.user.id).select();
+  assert.equal(res.error, null); // RLS silently matches 0 rows rather than erroring
+  assert.deepEqual(res.data, []);
+  const after = await admin().from('profiles').select('is_admin').eq('id', A.user.id).single();
+  assert.equal(after.data.is_admin, false);
+});
+
 test('admin_delete_user removes auth user; non-admin refused', async () => {
   const { A, B, apiA } = await pair();
-  await assert.rejects(apiA.adminDeleteUser(B.user.id), /admin only|42501/i);
+  await assert.rejects(apiA.adminDeleteUser(B.user.id), (e) => e.code === '42501');
   await promote(A.user.id);
   await apiA.adminDeleteUser(B.user.id);
   const { data } = await admin().from('profiles').select('id').eq('id', B.user.id);

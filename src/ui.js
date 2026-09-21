@@ -25,8 +25,10 @@ export function renderAuth(mode = 'login', error = '') {
 }
 
 export function renderShell(state, mainHtml) {
-  const { me, profiles, projects, view, assigneeId, projectFilter } = state;
-  const people = profiles.map(p => `<option value="${p.id}" ${p.id === assigneeId ? 'selected' : ''}>${esc(p.name)}${p.id === me.id ? ' (나)' : ''}</option>`).join('');
+  const { me, profiles, projects, jobs, view, assigneeId, projectFilter } = state;
+  const showUnassigned = me.is_admin || jobs.some(j => j.assignee_id === null);
+  const people = profiles.map(p => `<option value="${p.id}" ${p.id === assigneeId ? 'selected' : ''}>${esc(p.name)}${p.id === me.id ? ' (나)' : ''}</option>`).join('')
+    + (showUnassigned ? `<option value="__unassigned__" ${assigneeId === null ? 'selected' : ''}>미배정</option>` : '');
   const projs = projects.map(p => `<option value="${p.id}" ${p.id === projectFilter ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   return `
   <header class="topbar">
@@ -104,11 +106,12 @@ function applyProjectFilter(jobs, state) {
 }
 
 export function renderQueue(state) {
-  const who = displayName(state.assigneeId, state.profiles);
+  const unassigned = state.assigneeId === null;
+  const heading = unassigned ? '미배정 큐' : `${esc(displayName(state.assigneeId, state.profiles))}의 큐`;
   const open = applyProjectFilter(sortQueue(state.jobs, state.assigneeId), state);
   const past = applyProjectFilter(sortPast(state.jobs, state.assigneeId), state);
   return `
-  <h2>${esc(who)}의 큐 <span class="hint">(${open.length}건 · 들어온 순서)</span></h2>
+  <h2>${heading} <span class="hint">(${open.length}건 · 들어온 순서)</span></h2>
   <div class="rows">${open.length ? open.map(j => jobRow(j, state)).join('') : '<div class="empty">대기 중인 일이 없습니다</div>'}</div>
   <details class="past"><summary>지난 일 ${past.length}건</summary>
     <div class="rows">${past.map(j => jobRow(j, state, { showPos: false })).join('')}</div>
@@ -152,7 +155,6 @@ export function renderJobDetail(state, job, urls = {}) {
   };
   const canUploadReq = (isReq && job.status === 'waiting') || isAdmin;
   const canUploadRes = (isAsg && job.status !== 'rejected' && job.status !== 'cancelled') || isAdmin;
-  const people = profiles.filter(p => p.id !== job.assignee_id).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   const cs = comments.filter(c => c.job_id === job.id);
 
   const buttons = [];

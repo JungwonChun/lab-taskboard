@@ -176,6 +176,7 @@ alter table public.jobs        enable row level security;
 alter table public.attachments enable row level security;
 alter table public.comments    enable row level security;
 
+-- 의도적으로 update/delete 정책 없음 — is_admin 승격 방지; 삭제는 admin_delete_user의 cascade로만
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select to authenticated using (true);
 
@@ -240,21 +241,28 @@ create policy attachments_obj_delete on storage.objects for delete to authentica
   using (bucket_id = 'attachments' and (owner = auth.uid() or owner_id = auth.uid()::text or public.is_admin()));
 
 -- ───────── realtime ─────────
+-- A hosted Supabase project may not have supabase_realtime pre-created the
+-- way the local CLI stack does.
+do $$ begin
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    create publication supabase_realtime;
+  end if;
+end $$;
 do $$ begin
   alter publication supabase_realtime add table public.jobs;
-exception when duplicate_object then null; end $$;
+exception when duplicate_object or undefined_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table public.comments;
-exception when duplicate_object then null; end $$;
+exception when duplicate_object or undefined_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table public.projects;
-exception when duplicate_object then null; end $$;
+exception when duplicate_object or undefined_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table public.profiles;
-exception when duplicate_object then null; end $$;
+exception when duplicate_object or undefined_object then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table public.attachments;
-exception when duplicate_object then null; end $$;
+exception when duplicate_object or undefined_object then null; end $$;
 
 -- ───────── first admin (run AFTER 천정원 signs up in the app) ─────────
 -- update public.profiles set is_admin = true where name = '천정원';

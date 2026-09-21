@@ -78,6 +78,21 @@ export function translateAuthError(message) {
   return hit ? hit[1] : (message || '알 수 없는 오류');
 }
 
+const DB_ERROR_MESSAGES = [
+  [/42501/, /not allowed|may only|may not|invalid status transition|admin only/i, '권한이 없습니다'],
+  [/23514/, /reject_reason/i, '반려 사유를 입력하세요'],
+  [/23505/, /duplicate key/i, '이미 있는 이름입니다'],
+  [/23503/, null, '참조된 항목이 있어 처리할 수 없습니다'],
+];
+export function translateDbError(message, code) {
+  const c = String(code || '');
+  const m = String(message || '');
+  for (const [codeRe, msgRe, translated] of DB_ERROR_MESSAGES) {
+    if (codeRe.test(c) || (msgRe && msgRe.test(m))) return translated;
+  }
+  return message;
+}
+
 export function displayName(profileId, profiles) {
   const p = profileId && profiles.find(x => x.id === profileId);
   return p ? p.name : '탈퇴자';

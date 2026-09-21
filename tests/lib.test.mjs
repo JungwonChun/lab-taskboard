@@ -4,7 +4,7 @@ import {
   MAX_FILE_BYTES, UNCATEGORIZED_ID, URGENCY_EMOJI, STATUS_LABELS,
   validateName, nameToEmail, emailToName, isOpen, isOverdue,
   sortQueue, sortPast, queuePosition, validateFiles, formatDateTime,
-  translateAuthError, displayName,
+  translateAuthError, translateDbError, displayName,
 } from '../src/lib.js';
 
 test('constants', () => {
@@ -56,6 +56,16 @@ test('sortQueue orders open jobs FIFO by queued_at then id, for one assignee', (
   assert.deepEqual(sortQueue(jobs, P.b).map(j => j.id), ['4']);
 });
 
+test('sortQueue(jobs, null) returns only null-assignee open jobs', () => {
+  const jobs = [
+    mk({ id: '1', assignee_id: null, queued_at: '2026-09-21T01:00:00Z' }),
+    mk({ id: '2', assignee_id: null, queued_at: '2026-09-21T02:00:00Z', status: 'done' }),
+    mk({ id: '3', queued_at: '2026-09-21T00:00:00Z' }),
+    mk({ id: '4', assignee_id: null, queued_at: '2026-09-21T00:30:00Z' }),
+  ];
+  assert.deepEqual(sortQueue(jobs, null).map(j => j.id), ['4', '1']);
+});
+
 test('sortPast returns closed jobs newest finished first', () => {
   const jobs = [
     mk({ id: '1', status: 'done', finished_at: '2026-09-20T00:00:00Z' }),
@@ -93,6 +103,19 @@ test('translateAuthError', () => {
   assert.equal(translateAuthError('Invalid login credentials'), '이름 또는 비밀번호가 틀렸습니다');
   assert.equal(translateAuthError('Password should be at least 6 characters'), '비밀번호는 6자 이상이어야 합니다');
   assert.equal(translateAuthError('weird'), 'weird');
+});
+
+test('translateDbError', () => {
+  assert.equal(translateDbError('not allowed', null), '권한이 없습니다');
+  assert.equal(translateDbError('invalid status transition', null), '권한이 없습니다');
+  assert.equal(translateDbError('assignee may only change status', null), '권한이 없습니다');
+  assert.equal(translateDbError('anything', '42501'), '권한이 없습니다');
+  assert.equal(translateDbError('reject_reason required', null), '반려 사유를 입력하세요');
+  assert.equal(translateDbError('anything', '23514'), '반려 사유를 입력하세요');
+  assert.equal(translateDbError('duplicate key value violates unique constraint', null), '이미 있는 이름입니다');
+  assert.equal(translateDbError('anything', '23505'), '이미 있는 이름입니다');
+  assert.equal(translateDbError('anything', '23503'), '참조된 항목이 있어 처리할 수 없습니다');
+  assert.equal(translateDbError('some other message', null), 'some other message');
 });
 
 test('displayName falls back to 탈퇴자', () => {

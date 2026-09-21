@@ -1,5 +1,5 @@
 import { createApi } from './src/api.js';
-import { validateName, translateAuthError, validateFiles } from './src/lib.js';
+import { validateName, translateAuthError, displayName, validateFiles } from './src/lib.js';
 import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'queue', assigneeId: null, projectFilter: 'all', authMode: 'login', authError: '',
+  view: 'queue', assigneeId: undefined, projectFilter: 'all', authMode: 'login', authError: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -26,15 +26,33 @@ async function openJob(id) {
 }
 const curJob = () => state.jobs.find(j => j.id === state.openJobId);
 
+// Which of the two banners (if any) is currently showing — a REST-failure
+// banner and the realtime-down banner are independent signals, so 'up' from
+// the realtime channel must only clear the banner it put up, never one a
+// REST failure is still showing.
+let bannerKind = null; // 'rest' | 'realtime' | null
+
 async function refresh() {
   try {
     Object.assign(state, await api.loadAll());
     state.me = state.profiles.find(p => p.id === state.session.user.id) || null;
     if (!state.me) { await api.signOut(); return; }
-    if (!state.assigneeId) state.assigneeId = state.session.user.id;
+    if (state.assigneeId === undefined) state.assigneeId = state.session.user.id;
+    bannerKind = null;
     setBanner(null);
   } catch (e) {
+    bannerKind = 'rest';
     setBanner('서버에 연결할 수 없습니다. 관리자에게 Supabase 복구를 요청하세요. (' + e.message + ')');
+  }
+}
+
+function onRealtimeStatus(status) {
+  if (status === 'down') {
+    bannerKind = 'realtime';
+    setBanner('실시간 연결이 끊겼습니다. 30초마다 다시 시도합니다.');
+  } else if (status === 'up') {
+    if (bannerKind === 'realtime') { bannerKind = null; setBanner(null); }
+    scheduleRefresh();
   }
 }
 
@@ -130,7 +148,7 @@ export const actions = {
   },
 };
 export const changes = {
-  'assignee': (el) => { state.assigneeId = el.value; renderAll(); },
+  'assignee': (el) => { state.assigneeId = el.value === '__unassigned__' ? null : el.value; renderAll(); },
   'project-filter': (el) => { state.projectFilter = el.value; renderAll(); },
   'att-upload': async (el) => {
     const files = Array.from(el.files);
@@ -138,6 +156,10 @@ export const changes = {
     if (!chk.ok) { toast(`20MB 초과: ${chk.tooLarge.join(', ')}`, 'error'); el.value = ''; return; }
     for (const f of files) await api.uploadAttachment(state.openJobId, el.dataset.kind, f);
     toast('첨부했습니다');
+    // Pull the new attachment row in before rebuilding attUrls — attUrls is
+    // only populated inside openJob() from state.attachments, which is
+    // still the pre-upload snapshot at this point.
+    if (state.openJobId) { await refresh(); await openJob(state.openJobId); }
   },
 };
 export const forms = {
@@ -146,8 +168,14 @@ export const forms = {
     const v = validateName(fd.get('name'));
     if (!v.ok) { state.authError = v.error; renderAll(); return; }
     try {
-      if (form.dataset.mode === 'signup') await api.signUp(v.name, fd.get('password'));
-      else await api.signIn(v.name, fd.get('password'));
+      if (form.dataset.mode === 'signup') {
+        const data = await api.signUp(v.name, fd.get('password'));
+        if (!data.session) {
+          state.authError = '이메일 확인이 켜져 있어 가입이 완료되지 않았습니다. Supabase → Authentication → Providers → Email에서 Confirm email을 끄세요.';
+          renderAll();
+          return;
+        }
+      } else await api.signIn(v.name, fd.get('password'));
       state.authError = '';
     } catch (e) {
       state.authError = translateAuthError(e.message);
@@ -199,10 +227,9 @@ forms['job'] = async (form) => {
   state.editingJobId = null;
   if (id) { state.openJobId = job.id; await openJob(job.id); } else { state.openJobId = null; }
   renderAll();
-  toast(id ? '수정했습니다' : `의뢰를 제출했습니다 (${displayNameOf(job.assignee_id)} 큐)`);
+  toast(id ? '수정했습니다' : `의뢰를 제출했습니다 (${displayName(job.assignee_id, state.profiles)} 큐)`);
   if (failed.length) toast(`첨부 실패: ${failed.join('; ')} — 상세 화면에서 다시 올릴 수 있습니다`, 'error');
 };
-function displayNameOf(id) { return state.profiles.find(p => p.id === id)?.name ?? '탈퇴자'; }
 forms['project-add'] = async (form) => { await api.addProject(String(new FormData(form).get('name')).trim()); form.reset(); };
 
 // Actions/changes/forms that write to the server without re-rendering
@@ -291,9 +318,9 @@ async function onSession(session) {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (session) {
     await refresh();
-    unsubscribe = api.subscribe(scheduleRefresh);
+    unsubscribe = api.subscribe(scheduleRefresh, onRealtimeStatus);
   } else {
-    Object.assign(state, { me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [], assigneeId: null });
+    Object.assign(state, { me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [], assigneeId: undefined });
     closeModal();
   }
   renderAll();

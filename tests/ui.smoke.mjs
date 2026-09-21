@@ -1,3 +1,8 @@
+// These tests are sequential and order-dependent: later tests reuse users,
+// jobs, and browser pages/state created by earlier ones (nameA, aUserId,
+// bUserId, job titles, admin promotion, etc). Always run the whole file —
+// `npm run test:ui` — never a single test in isolation with node --test's
+// name/only filters.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -639,15 +644,12 @@ test('uploads a result attachment from the detail modal, then deletes it', async
   const fileInput = await pageB.$('input[type="file"][data-action="att-upload"][data-kind="result"]');
   assert.ok(fileInput, 'expected a result-attachment file input (B is the assignee)');
   await fileInput.uploadFile(tmpPath);
-  await pageB.waitForFunction(() => !!document.querySelector('.files li'), { timeout: 15000 });
-
-  // Reopen so the modal re-fetches signed URLs (attUrls is populated once,
-  // at open time) and the just-uploaded file shows as an actual link.
-  await closeModalIfOpen(pageB);
-  await openAsB(jobXTitle);
+  // app.js's att-upload handler now refreshes and reopens the job itself so
+  // the newly uploaded file shows as a real (signed-URL) link without any
+  // manual close/reopen here — regression test for the attUrls-staleness fix.
   await pageB.waitForFunction(() => !!document.querySelector('.files a'), { timeout: 15000 });
   const fileHref = await pageB.$eval('.files a', (el) => el.getAttribute('href'));
-  assert.ok(fileHref, 'expected the uploaded result attachment to show as a link');
+  assert.ok(fileHref, 'expected the uploaded result attachment to show as a link without reopening the modal');
 
   await pageB.evaluate(() => { window.confirm = () => true; });
   await clickAction(pageB, '.files button[data-action="att-delete"]');
@@ -838,6 +840,31 @@ test('admin panel: no 관리 button before promotion, appears after, lists users
     return row?.querySelector('.meta')?.textContent.includes('탈퇴자');
   }, { timeout: 15000 }, cJobTitle);
   await clickAction(page, '[data-action="view"][data-view="queue"]');
+
+  // The job A made for C is now assignee_id = null (C's profile is gone).
+  // As admin, A should be able to pick a 미배정 option in the assignee
+  // select, see the job listed there under a 미배정 큐 heading, and hand it
+  // off to B from the detail modal.
+  await reloadAndWaitReady(page);
+  await page.waitForFunction(() => !!document.querySelector('select[data-action="assignee"] option[value="__unassigned__"]'), { timeout: 15000 });
+  await selectAction(page, 'select[data-action="assignee"]', '__unassigned__');
+  await page.waitForFunction((title) => Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title), { timeout: 15000 }, cJobTitle);
+  const heading = await page.$eval('h2', (el) => el.textContent);
+  assert.ok(heading.includes('미배정 큐'), `expected a 미배정 큐 heading, got: ${heading}`);
+
+  await clickRow(page, cJobTitle);
+  await page.waitForSelector('.modal', { timeout: 5000 });
+  await clickAction(page, '[data-action="job-handoff"]');
+  await page.waitForSelector('#inline-form form[data-form="handoff"] select[name="assignee_id"]', { timeout: 5000 });
+  await page.select('#inline-form select[name="assignee_id"]', bUserId);
+  await clickAction(page, '#inline-form button.primary');
+  await page.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '대기', { timeout: 10000 });
+  await closeModalIfOpen(page);
+
+  await reloadAndWaitReady(pageB);
+  await pageB.waitForFunction((title) => Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === title), { timeout: 15000 }, cJobTitle);
+
+  await selectAction(page, 'select[data-action="assignee"]', aUserId);
 
   // C's own page ends up signed out (their profile no longer exists) on its next reload
   await pageC.reload({ waitUntil: 'networkidle0', timeout: 15000 });

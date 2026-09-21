@@ -1,7 +1,11 @@
-import { nameToEmail, MAX_FILE_BYTES } from './lib.js';
+import { nameToEmail, MAX_FILE_BYTES, translateDbError } from './lib.js';
 
 function must({ data, error }, what) {
-  if (error) throw new Error(`${what}: ${error.message}`);
+  if (error) {
+    const e = new Error(`${what}: ${translateDbError(error.message, error.code)}`);
+    e.code = error.code;
+    throw e;
+  }
   return data;
 }
 function mustRow(res, what) {
@@ -130,12 +134,16 @@ export function createApi(client) {
     },
 
     // ── realtime ──
-    subscribe(onChange) {
+    subscribe(onChange, onStatus) {
       const ch = client.channel('taskboard');
       for (const table of ['jobs', 'comments', 'projects', 'profiles', 'attachments']) {
         ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => onChange(table));
       }
-      ch.subscribe();
+      ch.subscribe((status) => {
+        if (!onStatus) return;
+        if (status === 'SUBSCRIBED') onStatus('up');
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') onStatus('down');
+      });
       return () => client.removeChannel(ch);
     },
   };

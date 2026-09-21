@@ -25,13 +25,14 @@ cp config.example.js config.js   # URL과 anon key 기입
 ## 4. 첫 관리자
 1. 배포된 페이지에서 `천정원`으로 가입.
 2. SQL Editor에서 실행: `update public.profiles set is_admin = true where name = '천정원';`
+3. 확인: 관리 화면에서 테스트용 사용자를 하나 가입시킨 뒤 삭제해 본다. 권한 오류로 실패하면 `admin_delete_user` 함수 소유자가 `auth.users`에 대한 delete 권한이 없는 것이 원인이므로, 대신 Supabase → Authentication → Users에서 직접 삭제한다.
 
 ## 5. 운영 메모
 - 무료 플랜은 7일간 활동이 없으면 일시정지된다. 대시보드에서 Restore 한 번이면 복구. 페이지 상단에 빨간 배너가 뜨면 이 경우다(연결 끊김 시에도 같은 배너가 뜨며 30초마다 재시도한다).
 - 파일 저장소는 총 1GB. 20MB 이상 또는 오래 보관할 파일은 seraph 경로로 적는다. 완료된 의뢰의 첨부는 정리한다.
 - 비밀번호 초기화: Supabase → Authentication → Users → 해당 사용자(이메일이 `u-…@board.local`) → Reset password / 또는 삭제 후 재가입.
-- 이름→이메일 변환: 이름의 UTF-8 hex. 관리자 화면의 이름으로 찾기 어려우면 브라우저 콘솔에서 `nameToEmail('이름')`.
-- 사용자 삭제(관리자 화면)는 SQL 함수 `admin_delete_user`를 호출한다. 삭제된 사용자는 기존 의뢰에 "탈퇴한 사용자"로 남는다.
+- 이메일 = `u-` + 이름의 UTF-8 hex + `@board.local`; 예: `ab` → `u-6162@board.local`.
+- 사용자 삭제(관리자 화면)는 SQL 함수 `admin_delete_user`를 호출한다. 삭제된 사용자는 기존 의뢰에 "탈퇴자"로 남는다.
 - 실시간: 다른 브라우저에서의 변경이 즉시 반영된다. 로그인 상태에서 새로고침해도 세션이 유지된다.
 
 ## 6. 개발·테스트
