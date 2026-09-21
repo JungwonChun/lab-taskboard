@@ -7,8 +7,9 @@
 
 - 누구나 이름+비밀번호로 가입·로그인한다.
 - 누구나 누구에게든(자기 자신 포함) 의뢰를 만든다.
+- 프로젝트 키워드는 담당자에게 속한다. 의뢰를 만들 때는 그 담당자의 키워드만 목록에 뜨고, 이름 변경·삭제는 주인과 관리자만 한다.
 - 담당자마다 큐가 있고, 큐는 **들어온 순서**로만 정렬된다. 긴급도는 표시용이며 순서에 영향을 주지 않는다.
-- 상태 변경(진행중·완료·반려·넘기기)은 담당자만 한다.
+- 상태 변경은 담당자만 한다. 담당자는 현재 상태와 무관하게 언제든 대기·진행중·완료·반려 중 하나를 고를 수 있다(취소는 의뢰자 전용).
 - 의뢰자는 대기 상태일 때만 수정·취소한다.
 - 첨부는 파일당 20MB 이하만 업로드하고, 큰 파일은 seraph 경로 텍스트로 대신한다.
 - 모두가 모든 큐·내용·첨부·댓글을 본다. 알림 기능은 없다.
@@ -35,17 +36,18 @@
 
 ### 2.4 의뢰 상세 (모달)
 - 표시: 제목, 프로젝트, 의뢰자 → 담당자, 긴급도, 마감, 생성 시각, 내용, 의뢰 첨부, seraph 경로, 상태, 반려 사유, 완료 메모, 결과 첨부, 댓글 스레드(작성자·시각·내용, 아래 입력창).
-- 담당자 버튼: `진행중`(대기→진행중), `완료`(진행중 또는 대기→완료; 완료 메모·결과 파일 선택 입력), `반려`(사유 필수), `넘기기`(사람 선택; 담당자 변경, 상태 대기, `queued_at` 갱신).
-- 의뢰자 버튼(대기 상태만): `수정`(폼 재사용), `취소`.
-- 관리자 버튼: `삭제`.
+- 버튼은 두 묶음이다.
+  - **진행상황**(담당자·관리자): `대기` `진행중` `완료` `반려` 네 개가 현재 상태와 무관하게 항상 뜨고 항상 눌린다. 현재 상태인 버튼만 강조된다. 완료는 메모·결과 파일을 함께 받고, 반려는 사유가 필수다.
+  - **의뢰 관리**: `내용 수정`·`의뢰 취소`(의뢰자, 대기 상태만), `담당자 넘기기`(담당자·관리자; 담당자 변경 후 상태 대기, `queued_at` 갱신), `삭제`(관리자).
 - 댓글 삭제: 본인 또는 관리자.
 
 ### 2.5 새 의뢰 / 수정 폼
-- 담당자(필수, 사용자 목록), 프로젝트(필수, 기존 선택 또는 "새 키워드" 입력 즉시 생성; 기본 "미분류"), 제목(필수), 내용(선택), 긴급도 1~5(기본 3), 마감 날짜+시각(선택), 첨부(선택, 여러 개, 각 20MB 이하), seraph 경로(선택, 텍스트).
+- 담당자(필수, 사용자 목록), 프로젝트(필수, **선택된 담당자의 키워드만** 목록에 뜨고 담당자를 바꾸면 즉시 갱신됨; "새 키워드" 입력 시 그 담당자 소유로 생성; 기본 "미분류"), 제목(필수), 내용(선택), 긴급도 1~5(기본 3), 마감 날짜+시각(선택), 첨부(선택, 여러 개, 각 20MB 이하), seraph 경로(선택, 텍스트).
 - 긴급도 이모지: 1 😌 · 2 🙂 · 3 😐 · 4 😟 · 5 🥵.
 
 ### 2.6 키워드 관리
-- 목록 + 추가 / 이름 변경 / 삭제. "미분류"는 변경·삭제 불가.
+- 상단에서 선택한 사람의 키워드만 보여준다(제목 `<이름>의 프로젝트 키워드`). 추가하면 그 사람 소유가 된다.
+- 이름 변경·삭제는 주인(`owner_id`)과 관리자만. 남의 키워드에는 "주인만 수정할 수 있습니다" 안내만 뜬다. "미분류"는 변경·삭제 불가.
 - 삭제 시 해당 프로젝트의 의뢰는 DB가 "미분류"로 옮긴다.
 
 ### 2.7 관리자
@@ -56,7 +58,7 @@
 
 ```
 profiles      id uuid PK = auth.users.id, name text UNIQUE NOT NULL, is_admin bool DEFAULT false, created_at
-projects      id uuid PK, name text UNIQUE NOT NULL, created_by uuid, created_at
+projects      id uuid PK, name text UNIQUE NOT NULL, created_by uuid, owner_id uuid -> profiles ON DELETE CASCADE (null=공용), created_at
               -- 고정 행: id = 00000000-0000-0000-0000-000000000000, name = '미분류'
 jobs          id uuid PK,
               requester_id uuid -> profiles, assignee_id uuid -> profiles,
@@ -85,7 +87,7 @@ comments      id uuid PK, job_id -> jobs ON DELETE CASCADE, author_id, body text
 | 테이블 | select | insert | update | delete |
 |---|---|---|---|---|
 | profiles | 로그인 사용자 전부 | 트리거만 | 본인(이름 변경 불가, 현재는 없음) | 관리자 |
-| projects | 전부 | 로그인 사용자 | 로그인 사용자, 단 미분류 제외 | 로그인 사용자, 단 미분류 제외 |
+| projects | 전부 | 로그인 사용자 | owner_id=본인 또는 관리자, 단 미분류 제외 | owner_id=본인 또는 관리자, 단 미분류 제외 |
 | jobs | 전부 | `requester_id = auth.uid()` | 아래 함수로 검사 | 관리자만(의뢰자는 삭제 대신 취소) |
 | attachments | 전부 | 의뢰자(kind=request, job이 waiting) 또는 담당자(kind=result) | 없음 | 업로더 또는 관리자 |
 | comments | 전부 | `author_id = auth.uid()` | 없음 | 작성자 또는 관리자 |
@@ -93,7 +95,7 @@ comments      id uuid PK, job_id -> jobs ON DELETE CASCADE, author_id, body text
 jobs update 정책은 `can_update_job(old, new)` 함수 한 곳에서 판정한다.
 - 관리자: 모두 허용.
 - 의뢰자이고 old.status = waiting: title/body/urgency/deadline/seraph_path/project_id/assignee_id 수정 허용, status는 waiting→cancelled만 허용. assignee 변경 시 queued_at 갱신은 트리거.
-- 담당자: 허용되는 전이만 — waiting→in_progress(started_at 세팅), waiting|in_progress→done(finished_at), waiting|in_progress→rejected(reject_reason 비어 있으면 거부, finished_at), waiting|in_progress→waiting with assignee 변경(넘기기; queued_at = now). 그 외 필드 변경 불가.
+- 담당자: status 를 waiting·in_progress·done·rejected 중 아무것이나, 현재 상태와 무관하게 지정 가능(cancelled 는 거부). rejected 는 reject_reason 이 비어 있으면 거부. 넘기기는 assignee 변경(queued_at = now). 그 외 필드 변경 불가. 타임스탬프: in_progress 진입 시 started_at=now·finished_at=null, 종료 상태 진입/변경 시 finished_at=now, waiting 복귀 시 둘 다 null.
 - 그 밖의 사용자: 거부.
 
 Storage 정책: 버킷 읽기는 로그인 사용자 전부, 업로드는 attachments insert 조건과 동일, 삭제는 업로더/관리자.

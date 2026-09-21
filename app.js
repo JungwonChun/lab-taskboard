@@ -1,6 +1,6 @@
 import { createApi } from './src/api.js';
-import { validateName, translateAuthError, displayName, validateFiles } from './src/lib.js';
-import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal } from './src/ui.js';
+import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID } from './src/lib.js';
+import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal, projectOptions, projectsFor } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
 const client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
@@ -123,6 +123,7 @@ export const actions = {
   },
   'open-job': (el) => { state.modal = null; return openJob(el.dataset.id); },
   'job-start': async () => { await api.startJob(state.openJobId); toast('진행중으로 바꿨습니다'); },
+  'job-wait': async () => { await api.updateJob(state.openJobId, { status: 'waiting' }); toast('대기로 되돌렸습니다'); },
   'job-done': () => { document.getElementById('inline-form').innerHTML = inlineForm('done', state, curJob()); },
   'job-reject': () => { document.getElementById('inline-form').innerHTML = inlineForm('reject', state, curJob()); },
   'job-handoff': () => { document.getElementById('inline-form').innerHTML = inlineForm('handoff', state, curJob()); },
@@ -148,8 +149,20 @@ export const actions = {
   },
 };
 export const changes = {
-  'assignee': (el) => { state.assigneeId = el.value === '__unassigned__' ? null : el.value; renderAll(); },
+  'assignee': (el) => {
+    state.assigneeId = el.value === '__unassigned__' ? null : el.value;
+    // 키워드는 사람별이므로, 새 사람의 목록에 없는 필터는 전체로 되돌린다.
+    if (state.projectFilter !== 'all' && !projectsFor(state.projects, state.assigneeId).some(p => p.id === state.projectFilter)) {
+      state.projectFilter = 'all';
+    }
+    renderAll();
+  },
   'project-filter': (el) => { state.projectFilter = el.value; renderAll(); },
+  // 의뢰 폼에서 담당자를 바꾸면 그 사람의 키워드로 목록을 갈아끼운다 (입력값은 건드리지 않는다).
+  'job-form-assignee': (el) => {
+    const sel = document.getElementById('job-project-select');
+    if (sel) sel.innerHTML = projectOptions(state.projects, el.value, UNCATEGORIZED_ID);
+  },
   'att-upload': async (el) => {
     const files = Array.from(el.files);
     const chk = validateFiles(files);
@@ -193,12 +206,12 @@ export const forms = {
   'comment': async (form) => { await api.addComment(state.openJobId, String(new FormData(form).get('body')).trim()); form.reset(); },
 };
 
-async function resolveProject(fd) {
+async function resolveProject(fd, assigneeId) {
   const name = String(fd.get('new_project') || '').trim();
   if (!name) return fd.get('project_id');
   const existing = state.projects.find(p => p.name === name);
   if (existing) return existing.id;
-  const p = await api.addProject(name);
+  const p = await api.addProject(name, assigneeId);
   return p.id;
 }
 
@@ -209,7 +222,7 @@ forms['job'] = async (form) => {
   if (!chk.ok) { toast(`20MB 초과: ${chk.tooLarge.join(', ')}`, 'error'); return; }
   const fields = {
     assignee_id: fd.get('assignee_id'),
-    project_id: await resolveProject(fd),
+    project_id: await resolveProject(fd, fd.get('assignee_id')),
     title: String(fd.get('title')).trim(),
     body: String(fd.get('body') || ''),
     urgency: Number(fd.get('urgency') || 3),
@@ -230,7 +243,7 @@ forms['job'] = async (form) => {
   toast(id ? '수정했습니다' : `의뢰를 제출했습니다 (${displayName(job.assignee_id, state.profiles)} 큐)`);
   if (failed.length) toast(`첨부 실패: ${failed.join('; ')} — 상세 화면에서 다시 올릴 수 있습니다`, 'error');
 };
-forms['project-add'] = async (form) => { await api.addProject(String(new FormData(form).get('name')).trim()); form.reset(); };
+forms['project-add'] = async (form) => { await api.addProject(String(new FormData(form).get('name')).trim(), state.assigneeId); form.reset(); };
 
 // Actions/changes/forms that write to the server without re-rendering
 // themselves — the delegated listeners below are responsible for the
@@ -242,7 +255,7 @@ forms['project-add'] = async (form) => { await api.addProject(String(new FormDat
 // the project-filter <select>'s change event further down the test suite),
 // and (b) for job-edit specifically, re-open the read-only detail modal on
 // top of the edit form it just opened, since state.openJobId is still set.
-const MUTATING_ACTIONS = new Set(['job-start', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete', 'project-rename', 'project-delete', 'user-delete']);
+const MUTATING_ACTIONS = new Set(['job-start', 'job-wait', 'job-cancel', 'job-delete', 'comment-delete', 'att-delete', 'project-rename', 'project-delete', 'user-delete']);
 const MUTATING_CHANGES = new Set(['att-upload']);
 const MUTATING_FORMS = new Set(['done', 'reject', 'handoff', 'comment', 'project-add']);
 

@@ -81,8 +81,9 @@ export function createApi(client) {
     },
 
     // ── projects ──
-    async addProject(name) {
-      return mustRow(await client.from('projects').insert({ name, created_by: await uid() }).select().single(), '키워드 추가');
+    async addProject(name, owner_id = null) {
+      const me = await uid();
+      return mustRow(await client.from('projects').insert({ name, created_by: me, owner_id: owner_id ?? me }).select().single(), '키워드 추가');
     },
     async renameProject(id, name) {
       return mustRow(await client.from('projects').update({ name }).eq('id', id).select().maybeSingle(), '키워드 수정');

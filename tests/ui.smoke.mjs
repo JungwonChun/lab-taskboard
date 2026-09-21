@@ -1047,6 +1047,70 @@ test('connection banner: a REST outage shows it, recovery hides it and reloads d
   }
 });
 
+test('진행상황: all four status buttons are always offered, and 대기 rolls a finished job back', async () => {
+  const title = uniq('상태전환');
+  await createJobForB(title);
+  await openAsB(title);
+
+  const labels = () => pageB.evaluate(() =>
+    Array.from(document.querySelectorAll('.status-actions button')).map((b) => b.textContent));
+  assert.deepEqual(await labels(), ['대기', '진행중', '완료', '반려'],
+    'expected all four status buttons on a waiting job');
+  const currentOnWaiting = await pageB.evaluate(() =>
+    document.querySelector('.status-actions button[aria-current]')?.textContent);
+  assert.equal(currentOnWaiting, '대기');
+
+  // 완료 -> the four buttons must still be there (status is always changeable)
+  await clickAction(pageB, '[data-action="job-done"]');
+  await pageB.waitForSelector('form[data-form="done"]', { timeout: 5000 });
+  await clickAction(pageB, 'form[data-form="done"] button.primary');
+  await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '완료', { timeout: 15000 });
+  assert.deepEqual(await labels(), ['대기', '진행중', '완료', '반려'],
+    'expected the status buttons to stay available on a finished job');
+  assert.equal(await pageB.evaluate(() =>
+    document.querySelector('.status-actions button[aria-current]')?.textContent), '완료');
+
+  // 완료 -> 대기 (the new job-wait action), which also clears the finish time
+  await clickAction(pageB, '[data-action="job-wait"]');
+  await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '대기', { timeout: 15000 });
+  const kv = await pageB.evaluate(() => document.querySelector('.modal .kv')?.textContent || '');
+  assert.ok(!kv.includes('종료'), 'expected 종료 time to be cleared when rolled back to 대기');
+});
+
+test('키워드는 담당자 소유: B의 키워드는 B를 담당자로 골랐을 때만 목록에 뜬다', async () => {
+  const keyword = uniq('B키워드');
+  const title = uniq('키워드소유');
+  await closeModalIfOpen(page);
+  await clickAction(page, '[data-action="new-job"]');
+  await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+  await page.type('form[data-form="job"] input[name="title"]', title);
+  await page.select('form[data-form="job"] select[name="assignee_id"]', bUserId);
+  await page.type('form[data-form="job"] input[name="new_project"]', keyword);
+  await Promise.all([
+    page.waitForFunction(() => document.getElementById('modal-root').hidden, { timeout: 15000 }),
+    clickAction(page, 'form[data-form="job"] button.primary'),
+  ]);
+  await waitForQuiet(page);
+
+  const optionsFor = async (userId) => {
+    await clickAction(page, '[data-action="new-job"]');
+    await page.waitForSelector('form[data-form="job"]', { timeout: 5000 });
+    await page.select('form[data-form="job"] select[name="assignee_id"]', userId);
+    // the change handler swaps the keyword list in place
+    await page.waitForFunction(() => document.getElementById('job-project-select'), { timeout: 5000 });
+    const opts = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#job-project-select option')).map((o) => o.textContent));
+    await closeModalIfOpen(page);
+    return opts;
+  };
+
+  const forB = await optionsFor(bUserId);
+  assert.ok(forB.includes(keyword), `expected ${keyword} in B's keyword list, got ${forB.join(',')}`);
+  const forA = await optionsFor(aUserId);
+  assert.ok(!forA.includes(keyword), `expected ${keyword} to be hidden when A is the assignee, got ${forA.join(',')}`);
+  assert.ok(forA.includes('미분류'), 'expected 미분류 to stay available for everyone');
+});
+
 test('no unexpected console errors were captured', () => {
   // ERR_FAILED entries are the browser's own console noise from the
   // connection-banner test's deliberate request-interception aborts above —

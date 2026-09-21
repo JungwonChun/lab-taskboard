@@ -66,6 +66,38 @@ test('assignee: done allowed; rejected without reason refused; reason required',
   assert.equal(rej.reject_reason, '범위 밖');
 });
 
+test('assignee may change status freely in any direction, but cannot cancel', async () => {
+  const { B, apiA, apiB } = await pair();
+  const job = await apiA.createJob({ assignee_id: B.user.id, title: '자유 전환' });
+  const done = await apiB.finishJob(job.id, '1차');
+  assert.equal(done.status, 'done');
+  const back = await apiB.startJob(job.id);            // done -> in_progress
+  assert.equal(back.status, 'in_progress');
+  assert.equal(back.finished_at, null);
+  const waiting = await apiB.updateJob(job.id, { status: 'waiting' });  // -> waiting
+  assert.equal(waiting.status, 'waiting');
+  assert.equal(waiting.started_at, null);
+  const rej = await apiB.rejectJob(job.id, '역시 안 되겠다');
+  assert.equal(rej.status, 'rejected');
+  const done2 = await apiB.finishJob(job.id, '2차');    // rejected -> done
+  assert.equal(done2.status, 'done');
+  await assert.rejects(apiB.cancelJob(job.id), (e) => e.code === '42501');  // 취소는 의뢰자 전용
+});
+
+test('keyword ownership: only the owner or an admin may rename or delete', async () => {
+  const { A, B, apiA, apiB } = await pair();
+  const proj = await apiA.addProject(uniq('소유'), B.user.id);   // B 소유로 생성
+  assert.equal(proj.owner_id, B.user.id);
+  await assert.rejects(apiA.renameProject(proj.id, uniq('바꿈')));  // 주인이 아닌 A는 불가
+  await assert.rejects(apiA.deleteProject(proj.id));
+  const renamed = await apiB.renameProject(proj.id, uniq('주인이바꿈'));
+  assert.ok(renamed);
+  await promote(A.user.id);
+  await apiA.deleteProject(proj.id);                              // 관리자는 가능
+  const { data } = await admin().from('projects').select('id').eq('id', proj.id);
+  assert.equal(data.length, 0);
+});
+
 test('requester may edit/cancel only while waiting; assignee may not edit content', async () => {
   const { B, apiA, apiB } = await pair();
   const job = await apiA.createJob({ assignee_id: B.user.id, title: '수정 전' });
@@ -112,7 +144,7 @@ test('non-party user cannot touch the job; admin can delete', async () => {
 
 test('deleting a project moves its jobs to 미분류; 미분류 cannot be renamed', async () => {
   const { B, apiA } = await pair();
-  const proj = await apiA.addProject(uniq('프로젝트'));
+  const proj = await apiA.addProject(uniq('프로젝트'));   // 기본 소유자 = 만든 사람
   const job = await apiA.createJob({ assignee_id: B.user.id, title: '프로젝트 일', project_id: proj.id });
   assert.equal(job.project_id, proj.id);
   await apiA.deleteProject(proj.id);

@@ -13,8 +13,11 @@ create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
   name text not null unique check (length(name) between 1 and 40),
   created_by uuid references public.profiles(id) on delete set null,
+  -- owner_id = 이 키워드가 속한 사람(담당자). null 이면 공용(미분류).
+  owner_id uuid references public.profiles(id) on delete cascade,
   created_at timestamptz not null default now()
 );
+alter table public.projects add column if not exists owner_id uuid references public.profiles(id) on delete cascade;
 insert into public.projects (id, name)
 values ('00000000-0000-0000-0000-000000000000', '미분류')
 on conflict (id) do nothing;
@@ -133,21 +136,14 @@ begin
        or new.requester_id is distinct from old.requester_id then
       raise exception 'requester may not change that field' using errcode = '42501';
     end if;
-  elsif uid = old.assignee_id and not closed then
+  elsif uid = old.assignee_id then
     if new.title <> old.title or new.body <> old.body or new.urgency <> old.urgency
        or new.deadline is distinct from old.deadline or new.seraph_path <> old.seraph_path
        or new.project_id <> old.project_id or new.requester_id is distinct from old.requester_id then
       raise exception 'assignee may only change status' using errcode = '42501';
     end if;
-    if new.status = 'in_progress' and old.status = 'waiting' and new.assignee_id = old.assignee_id then
-      null;
-    elsif new.status = 'done' then
-      null;
-    elsif new.status = 'rejected' then
-      null;
-    elsif new.status = 'waiting' and new.assignee_id is distinct from old.assignee_id then
-      null; -- handoff
-    else
+    -- 담당자는 언제든 대기/진행중/완료/반려로 바꿀 수 있다. 취소는 의뢰자 전용.
+    if new.status = 'cancelled' then
       raise exception 'invalid status transition' using errcode = '42501';
     end if;
   else
@@ -160,8 +156,8 @@ begin
 
   new.created_at := old.created_at;
   if new.assignee_id is distinct from old.assignee_id then new.queued_at := now(); else new.queued_at := old.queued_at; end if;
-  if new.status = 'in_progress' and old.status <> 'in_progress' then new.started_at := now(); end if;
-  if new.status in ('done','rejected','cancelled') and not closed then new.finished_at := now(); end if;
+  if new.status = 'in_progress' and old.status <> 'in_progress' then new.started_at := now(); new.finished_at := null; end if;
+  if new.status in ('done','rejected','cancelled') and (not closed or new.status <> old.status) then new.finished_at := now(); end if;
   if new.status = 'waiting' and old.status <> 'waiting' then new.started_at := null; new.finished_at := null; end if;
   return new;
 end $$;
@@ -186,11 +182,12 @@ drop policy if exists projects_update on public.projects;
 drop policy if exists projects_delete on public.projects;
 create policy projects_select on public.projects for select to authenticated using (true);
 create policy projects_insert on public.projects for insert to authenticated with check (true);
+-- 이름 변경·삭제는 키워드 주인(owner_id)과 관리자만. 미분류는 고정.
 create policy projects_update on public.projects for update to authenticated
-  using (id <> '00000000-0000-0000-0000-000000000000')
-  with check (id <> '00000000-0000-0000-0000-000000000000');
+  using (id <> '00000000-0000-0000-0000-000000000000' and (owner_id = auth.uid() or public.is_admin()))
+  with check (id <> '00000000-0000-0000-0000-000000000000' and (owner_id = auth.uid() or public.is_admin()));
 create policy projects_delete on public.projects for delete to authenticated
-  using (id <> '00000000-0000-0000-0000-000000000000');
+  using (id <> '00000000-0000-0000-0000-000000000000' and (owner_id = auth.uid() or public.is_admin()));
 
 drop policy if exists jobs_select on public.jobs;
 drop policy if exists jobs_insert on public.jobs;

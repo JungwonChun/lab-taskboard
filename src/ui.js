@@ -29,7 +29,8 @@ export function renderShell(state, mainHtml) {
   const showUnassigned = me.is_admin || jobs.some(j => j.assignee_id === null);
   const people = profiles.map(p => `<option value="${p.id}" ${p.id === assigneeId ? 'selected' : ''}>${esc(p.name)}${p.id === me.id ? ' (나)' : ''}</option>`).join('')
     + (showUnassigned ? `<option value="__unassigned__" ${assigneeId === null ? 'selected' : ''}>미배정</option>` : '');
-  const projs = projects.map(p => `<option value="${p.id}" ${p.id === projectFilter ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const projs = projectsFor(projects, view === 'sent' ? me.id : assigneeId)
+    .map(p => `<option value="${p.id}" ${p.id === projectFilter ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
   return `
   <header class="topbar">
     <span class="brand">Lab Taskboard</span>
@@ -74,6 +75,11 @@ export function closeModal() {
 
 function projectName(id, projects) {
   return projects.find(p => p.id === id)?.name ?? '미분류';
+}
+
+// 키워드는 담당자 소유. ownerId 의 키워드 + 공용(미분류)만 고른다.
+export function projectsFor(projects, ownerId) {
+  return projects.filter(p => p.id === UNCATEGORIZED_ID || (ownerId != null && p.owner_id === ownerId));
 }
 
 export function jobRow(job, state, { showPos = true, showAssignee = false } = {}) {
@@ -157,11 +163,23 @@ export function renderJobDetail(state, job, urls = {}) {
   const canUploadRes = (isAsg && job.status !== 'rejected' && job.status !== 'cancelled') || isAdmin;
   const cs = comments.filter(c => c.job_id === job.id);
 
-  const buttons = [];
-  if ((isAsg || isAdmin) && job.status === 'waiting') buttons.push('<button class="primary" data-action="job-start">진행중으로</button>');
-  if ((isAsg || isAdmin) && open) buttons.push('<button data-action="job-done">완료</button>', '<button data-action="job-reject">반려</button>', '<button data-action="job-handoff">넘기기</button>');
-  if ((isReq || isAdmin) && job.status === 'waiting') buttons.push('<button data-action="job-edit">수정</button>', '<button class="danger" data-action="job-cancel">취소</button>');
-  if (isAdmin) buttons.push('<button class="danger" data-action="job-delete">삭제</button>');
+  // 진행상황: 담당자(또는 관리자)는 현재 상태와 관계없이 언제든 네 가지 중 하나를 고를 수 있다.
+  const STATUS_BUTTONS = [
+    ['waiting', 'job-wait', '대기'],
+    ['in_progress', 'job-start', '진행중'],
+    ['done', 'job-done', '완료'],
+    ['rejected', 'job-reject', '반려'],
+  ];
+  const canStatus = isAsg || isAdmin;
+  const statusButtons = STATUS_BUTTONS.map(([st, action, label]) => {
+    const cur = job.status === st;
+    return `<button class="${cur ? 'primary' : ''}" data-action="${action}"${cur ? ' aria-current="true"' : ''}>${label}</button>`;
+  }).join('');
+
+  const manage = [];
+  if ((isReq || isAdmin) && job.status === 'waiting') manage.push('<button data-action="job-edit">내용 수정</button>', '<button class="danger" data-action="job-cancel">의뢰 취소</button>');
+  if (canStatus) manage.push('<button data-action="job-handoff">담당자 넘기기</button>');
+  if (isAdmin) manage.push('<button class="danger" data-action="job-delete">삭제</button>');
 
   return `
   <button class="close" data-action="close-modal">✕</button>
@@ -186,7 +204,8 @@ export function renderJobDetail(state, job, urls = {}) {
   <h4>결과 첨부</h4>${fileList('result')}
   ${canUploadRes ? '<input type="file" multiple data-action="att-upload" data-kind="result">' : ''}
 
-  <div class="actions">${buttons.join('')}</div>
+  ${canStatus ? `<h4>진행상황</h4><div class="actions status-actions">${statusButtons}</div>` : ''}
+  ${manage.length ? `<h4>의뢰 관리</h4><div class="actions">${manage.join('')}</div>` : ''}
   <div id="inline-form"></div>
 
   <h4>댓글 ${cs.length}</h4>
@@ -208,18 +227,23 @@ export function inlineForm(kind, state, job) {
 }
 
 export function renderProjectsModal(state) {
-  const items = state.projects.map(p => {
+  const ownerId = state.assigneeId;
+  const owner = ownerId == null ? null : state.profiles.find(p => p.id === ownerId);
+  const items = projectsFor(state.projects, ownerId).map(p => {
     const n = state.jobs.filter(j => j.project_id === p.id).length;
     const locked = p.id === UNCATEGORIZED_ID;
+    const mine = p.owner_id === state.me.id || state.me.is_admin;
     return `<li><span class="name">#${esc(p.name)} <span class="hint">(${n}건)</span></span>
-      ${locked ? '<span class="hint">고정</span>' : `<button data-action="project-rename" data-id="${p.id}" data-name="${esc(p.name)}">이름 변경</button><button class="danger" data-action="project-delete" data-id="${p.id}" data-name="${esc(p.name)}">삭제</button>`}</li>`;
+      ${locked ? '<span class="hint">고정</span>'
+        : mine ? `<button data-action="project-rename" data-id="${p.id}" data-name="${esc(p.name)}">이름 변경</button><button class="danger" data-action="project-delete" data-id="${p.id}" data-name="${esc(p.name)}">삭제</button>`
+        : '<span class="hint">주인만 수정할 수 있습니다</span>'}</li>`;
   }).join('');
   return `
   <button class="close" data-action="close-modal">✕</button>
-  <h3>프로젝트 키워드</h3>
-  <p class="hint">누구나 추가·변경·삭제할 수 있습니다. 삭제하면 그 키워드의 의뢰는 #미분류로 옮겨집니다.</p>
+  <h3>${owner ? esc(owner.name) + '의 프로젝트 키워드' : '프로젝트 키워드'}</h3>
+  <p class="hint">키워드는 담당자에게 속합니다. 여기 목록은 상단에서 선택한 사람의 것입니다. 이름 변경·삭제는 주인과 관리자만 할 수 있고, 삭제하면 그 키워드의 의뢰는 #미분류로 옮겨집니다.</p>
   <ul class="list-manage">${items}</ul>
-  <form data-form="project-add" class="inline" style="margin-top:12px"><input name="name" required maxlength="40" placeholder="새 키워드"><button class="primary">추가</button></form>`;
+  ${owner ? `<form data-form="project-add" class="inline" style="margin-top:12px"><input name="name" required maxlength="40" placeholder="${esc(owner.name)}의 새 키워드"><button class="primary">추가</button></form>` : '<div class="hint">미배정에는 키워드를 추가할 수 없습니다.</div>'}`;
 }
 
 export function renderAdminModal(state) {
@@ -237,19 +261,25 @@ export function renderAdminModal(state) {
   <ul class="list-manage">${rows}</ul>`;
 }
 
+export function projectOptions(projects, ownerId, selectedId) {
+  return projectsFor(projects, ownerId)
+    .map(p => `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+}
+
 export function renderJobForm(state, job = null) {
   const { profiles, projects, me } = state;
   const v = job || { assignee_id: me.id, project_id: UNCATEGORIZED_ID, title: '', body: '', urgency: 3, deadline: null, seraph_path: '' };
   const people = profiles.map(p => `<option value="${p.id}" ${p.id === v.assignee_id ? 'selected' : ''}>${esc(p.name)}${p.id === me.id ? ' (나)' : ''}</option>`).join('');
-  const projs = projects.map(p => `<option value="${p.id}" ${p.id === v.project_id ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const projs = projectOptions(projects, v.assignee_id, v.project_id);
   const urg = [1, 2, 3, 4, 5].map(n => `<label style="display:inline-flex;align-items:center;gap:4px;margin:0 10px 0 0;font-size:18px"><input type="radio" name="urgency" value="${n}" ${n === v.urgency ? 'checked' : ''} style="width:auto">${URGENCY_EMOJI[n]}</label>`).join('');
   return `
   <button class="close" data-action="close-modal">✕</button>
   <h3>${job ? '의뢰 수정' : '새 의뢰'}</h3>
   <form data-form="job" data-id="${job ? job.id : ''}">
-    <label>담당자</label><select name="assignee_id">${people}</select>
+    <label>담당자</label><select name="assignee_id" data-action="job-form-assignee">${people}</select>
     <label>프로젝트</label>
-    <div class="inline"><select name="project_id">${projs}</select><input name="new_project" placeholder="새 키워드 (입력 시 우선)" maxlength="40"></div>
+    <div class="inline"><select name="project_id" id="job-project-select">${projs}</select><input name="new_project" placeholder="새 키워드 (입력 시 우선)" maxlength="40"></div>
+    <div class="hint">키워드는 담당자에게 속합니다. 담당자를 바꾸면 목록도 바뀝니다.</div>
     <label>제목 *</label><input name="title" required maxlength="200" value="${esc(v.title)}">
     <label>내용</label><textarea name="body">${esc(v.body)}</textarea>
     <label>긴급도</label><div>${urg}</div>
