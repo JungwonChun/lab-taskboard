@@ -133,6 +133,78 @@ function toLocalInput(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+export function renderJobDetail(state, job, urls = {}) {
+  const { me, profiles, projects, attachments, comments, jobs } = state;
+  const isAdmin = !!me.is_admin;
+  const isReq = job.requester_id === me.id;
+  const isAsg = job.assignee_id === me.id;
+  const open = ['waiting', 'in_progress'].includes(job.status);
+  const pos = queuePosition(job, jobs);
+  const atts = (kind) => attachments.filter(a => a.job_id === job.id && a.kind === kind);
+  const fileList = (kind) => {
+    const list = atts(kind);
+    if (!list.length) return '<div class="hint">없음</div>';
+    return `<ul class="files">${list.map(a => `<li>
+      ${urls[a.id] ? `<a href="${urls[a.id]}" target="_blank" rel="noopener">${esc(a.filename)}</a>` : esc(a.filename)}
+      <span class="hint">(${(a.size_bytes / 1048576).toFixed(1)} MB)</span>
+      ${(a.uploader_id === me.id || isAdmin) ? `<button class="danger" style="padding:2px 8px;margin-left:6px" data-action="att-delete" data-id="${a.id}">삭제</button>` : ''}
+    </li>`).join('')}</ul>`;
+  };
+  const canUploadReq = (isReq && job.status === 'waiting') || isAdmin;
+  const canUploadRes = (isAsg && job.status !== 'rejected' && job.status !== 'cancelled') || isAdmin;
+  const people = profiles.filter(p => p.id !== job.assignee_id).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  const cs = comments.filter(c => c.job_id === job.id);
+
+  const buttons = [];
+  if ((isAsg || isAdmin) && job.status === 'waiting') buttons.push('<button class="primary" data-action="job-start">진행중으로</button>');
+  if ((isAsg || isAdmin) && open) buttons.push('<button data-action="job-done">완료</button>', '<button data-action="job-reject">반려</button>', '<button data-action="job-handoff">넘기기</button>');
+  if ((isReq || isAdmin) && job.status === 'waiting') buttons.push('<button data-action="job-edit">수정</button>', '<button class="danger" data-action="job-cancel">취소</button>');
+  if (isAdmin) buttons.push('<button class="danger" data-action="job-delete">삭제</button>');
+
+  return `
+  <button class="close" data-action="close-modal">✕</button>
+  <h3>${URGENCY_EMOJI[job.urgency]} ${esc(job.title)}</h3>
+  <span class="badge ${job.status}">${STATUS_LABELS[job.status]}</span>
+  ${pos ? `<span class="hint"> · ${esc(displayName(job.assignee_id, profiles))} 큐 ${pos}번째</span>` : ''}
+  <dl class="kv">
+    <dt>프로젝트</dt><dd>#${esc(projectName(job.project_id, projects))}</dd>
+    <dt>의뢰 → 담당</dt><dd>${esc(displayName(job.requester_id, profiles))} → ${esc(displayName(job.assignee_id, profiles))}</dd>
+    <dt>마감</dt><dd class="${isOverdue(job) ? 'deadline over' : ''}">${job.deadline ? formatDateTime(job.deadline) : '없음'}</dd>
+    <dt>생성</dt><dd>${formatDateTime(job.created_at)}</dd>
+    ${job.started_at ? `<dt>시작</dt><dd>${formatDateTime(job.started_at)}</dd>` : ''}
+    ${job.finished_at ? `<dt>종료</dt><dd>${formatDateTime(job.finished_at)}</dd>` : ''}
+    ${job.seraph_path ? `<dt>seraph</dt><dd><code>${esc(job.seraph_path)}</code></dd>` : ''}
+  </dl>
+  ${job.body ? `<div class="body-text">${esc(job.body)}</div>` : ''}
+  ${job.status === 'rejected' ? `<div class="body-text" style="background:#fee2e2"><b>반려 사유:</b> ${esc(job.reject_reason)}</div>` : ''}
+  ${job.status === 'done' && job.result_note ? `<div class="body-text" style="background:#dcfce7"><b>완료 메모:</b> ${esc(job.result_note)}</div>` : ''}
+
+  <h4>의뢰 첨부</h4>${fileList('request')}
+  ${canUploadReq ? '<input type="file" multiple data-action="att-upload" data-kind="request">' : ''}
+  <h4>결과 첨부</h4>${fileList('result')}
+  ${canUploadRes ? '<input type="file" multiple data-action="att-upload" data-kind="result">' : ''}
+
+  <div class="actions">${buttons.join('')}</div>
+  <div id="inline-form"></div>
+
+  <h4>댓글 ${cs.length}</h4>
+  <ul class="comments">${cs.map(c => `<li>
+    <span class="who">${esc(displayName(c.author_id, profiles))}</span><span class="when">${formatDateTime(c.created_at)}</span>
+    ${(c.author_id === me.id || isAdmin) ? `<button style="padding:0 6px;margin-left:6px;font-size:11px" data-action="comment-delete" data-id="${c.id}">삭제</button>` : ''}
+    <div class="text">${esc(c.body)}</div></li>`).join('')}</ul>
+  <form data-form="comment" class="inline"><textarea name="body" required placeholder="댓글"></textarea><button class="primary">등록</button></form>`;
+}
+
+export function inlineForm(kind, state, job) {
+  if (kind === 'done') return `<form data-form="done"><label>완료 메모 (선택)</label><textarea name="result_note"></textarea><div class="actions"><button class="primary">완료 처리</button></div></form>`;
+  if (kind === 'reject') return `<form data-form="reject"><label>반려 사유 *</label><textarea name="reject_reason" required></textarea><div class="actions"><button class="danger">반려</button></div></form>`;
+  if (kind === 'handoff') {
+    const people = state.profiles.filter(p => p.id !== job.assignee_id).map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    return `<form data-form="handoff"><label>넘길 사람</label><select name="assignee_id">${people}</select><div class="actions"><button class="primary">넘기기 (그 사람 큐 맨 뒤로)</button></div></form>`;
+  }
+  return '';
+}
+
 export function renderJobForm(state, job = null) {
   const { profiles, projects, me } = state;
   const v = job || { assignee_id: me.id, project_id: UNCATEGORIZED_ID, title: '', body: '', urgency: 3, deadline: null, seraph_path: '' };

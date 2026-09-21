@@ -70,7 +70,7 @@ details.past summary { cursor: pointer; color: var(--muted); margin: 16px 0 8px;
 .list-manage .name { flex: 1; }
 .hint { color: var(--muted); font-size: 12px; }
 
-#toast-root { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 20; }
+#toast-root { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 20; pointer-events: none; }
 .toast { background: #111827; color: #fff; padding: 8px 14px; border-radius: 8px; font-size: 13px; opacity: .95; }
 .toast.error { background: var(--danger); }
 
