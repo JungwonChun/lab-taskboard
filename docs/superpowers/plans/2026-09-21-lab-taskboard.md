@@ -686,8 +686,9 @@ create policy attachments_obj_insert on storage.objects for insert to authentica
     and array_length(storage.foldername(name), 1) = 2
     and public.can_upload_to_job((storage.foldername(name))[1]::uuid, (storage.foldername(name))[2])
   );
+-- storage.objects has both `owner` (uuid, deprecated) and `owner_id` (text); check either so this works across Supabase versions
 create policy attachments_obj_delete on storage.objects for delete to authenticated
-  using (bucket_id = 'attachments' and (owner = auth.uid() or public.is_admin()));
+  using (bucket_id = 'attachments' and (owner = auth.uid() or owner_id = auth.uid()::text or public.is_admin()));
 
 -- ───────── realtime ─────────
 do $$ begin
@@ -874,6 +875,8 @@ test('attachments: requester uploads request file while waiting; assignee upload
   const url = await apiA.attachmentUrl(res.storage_path);
   assert.match(url, /attachments/);
   await apiB.deleteAttachment(res);
+  const { data: left } = await admin().storage.from('attachments').list(`${job.id}/result`);
+  assert.equal((left || []).length, 0, 'storage object must be removed too');
 });
 
 test('admin_delete_user removes auth user; non-admin refused', async () => {
@@ -1006,7 +1009,8 @@ export function createApi(client) {
     async deleteAttachment(att) {
       const data = must(await client.from('attachments').delete().eq('id', att.id).select('id'), '첨부 삭제');
       if (!data.length) throw new Error('첨부 삭제: 권한이 없습니다');
-      await client.storage.from('attachments').remove([att.storage_path]);
+      const rm = await client.storage.from('attachments').remove([att.storage_path]);
+      if (rm.error || !rm.data?.length) throw new Error('첨부 기록은 지웠지만 파일 삭제에 실패했습니다: ' + (rm.error?.message || '권한 없음'));
     },
 
     // ── admin ──
@@ -1650,9 +1654,28 @@ async function openJob(id) {
 }
 const curJob = () => state.jobs.find(j => j.id === state.openJobId);
 
-// re-render open modal after every render()
+// re-render open modal after every render(), but never wipe a draft the user is typing
+function modalHasDraft() {
+  const root = document.getElementById('modal-root');
+  if (root.hidden) return false;
+  const active = document.activeElement;
+  if (active && root.contains(active) && ['TEXTAREA', 'INPUT', 'SELECT'].includes(active.tagName)) return true;
+  return Array.from(root.querySelectorAll('textarea, input[type=text], input[name=title]')).some(el => el.value.trim() !== '' && el.defaultValue !== el.value);
+}
+let pendingModalRefresh = false;
 const _render = render;
-export function renderAll() { _render(); if (state.openJobId) { const j = curJob(); if (j) openModal(renderJobDetail(state, j, attUrls)); else { state.openJobId = null; closeModal(); } } }
+export function renderAll() {
+  _render();
+  if (!state.openJobId) return;
+  const j = curJob();
+  if (!j) { state.openJobId = null; closeModal(); return; }
+  if (modalHasDraft()) { pendingModalRefresh = true; return; }   // redraw later, after the form is submitted or blurred
+  pendingModalRefresh = false;
+  openModal(renderJobDetail(state, j, attUrls));
+}
+document.getElementById('modal-root').addEventListener('focusout', () => {
+  setTimeout(() => { if (pendingModalRefresh && !modalHasDraft()) renderAll(); }, 50);
+});
 
 Object.assign(actions, {
   'open-job': (el) => openJob(el.dataset.id),
@@ -1928,6 +1951,7 @@ Create empty `.nojekyll` at repo root so `_`-prefixed paths are not ignored.
 - [ ] 키워드: 추가·이름 변경·삭제(→미분류). 미분류 고정.
 - [ ] 관리자: 관리 버튼, 사용자 삭제 → 탈퇴자 표시, 의뢰 삭제.
 - [ ] 실시간: 다른 브라우저 변경이 1초 내 반영.
+- [ ] 댓글 입력 중 다른 브라우저가 상태를 바꿔도 쓰던 글이 남아 있고, 등록 후 최신 상태로 갱신.
 - [ ] 모바일 폭(400px)에서 가로 스크롤 없음.
 - [ ] Supabase 일시정지 상태에서 빨간 배너.
 ```
