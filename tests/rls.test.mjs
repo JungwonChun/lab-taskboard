@@ -84,6 +84,22 @@ test('assignee may change status freely in any direction, but cannot cancel', as
   await assert.rejects(apiB.cancelJob(job.id), (e) => e.code === '42501');  // 취소는 의뢰자 전용
 });
 
+test('자기 자신에게 맡긴 일도 본인이 상태와 예상 마무리를 바꿀 수 있다', async () => {
+  const { A, apiA } = await pair();
+  const job = await apiA.createJob({ assignee_id: A.user.id, title: '셀프' });
+  const iso = new Date(Date.now() + 86400000).toISOString();
+  const withEta = await apiA.setEta(job.id, iso);           // 의뢰자=담당자
+  assert.equal(new Date(withEta.eta).toISOString(), iso);
+  const started = await apiA.startJob(job.id);
+  assert.equal(started.status, 'in_progress');
+  const edited = await apiA.updateJob(job.id, { status: 'waiting' });
+  assert.equal(edited.status, 'waiting');
+  const retitled = await apiA.updateJob(job.id, { title: '셀프수정' });   // 대기 상태이므로 내용도 가능
+  assert.equal(retitled.title, '셀프수정');
+  const cancelled = await apiA.cancelJob(job.id);
+  assert.equal(cancelled.status, 'cancelled');
+});
+
 test('예상 마무리(eta)는 담당자만 적을 수 있다', async () => {
   const { B, apiA, apiB } = await pair();
   const job = await apiA.createJob({ assignee_id: B.user.id, title: '예상시간' });

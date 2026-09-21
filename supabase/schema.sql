@@ -129,27 +129,52 @@ create trigger jobs_before_insert before insert on public.jobs
 create or replace function public.jobs_before_update() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
-  uid uuid := auth.uid();
-  adm boolean := public.is_admin();
+  uid   uuid    := auth.uid();
+  adm   boolean := public.is_admin();
+  is_req boolean := uid is not null and uid = old.requester_id;
+  is_asg boolean := uid is not null and uid = old.assignee_id;
   closed boolean := old.status in ('done','rejected','cancelled');
+  content_changed boolean :=
+       new.title <> old.title or new.body <> old.body or new.urgency <> old.urgency
+    or new.deadline is distinct from old.deadline or new.seraph_path <> old.seraph_path
+    or new.project_id <> old.project_id;
 begin
+  -- 한 사람이 의뢰자이면서 담당자일 수 있다(자기 자신에게 맡긴 일). 그래서
+  -- 둘 중 하나를 고르지 않고, 각 필드마다 "그 필드를 만질 수 있는 역할"을 따진다.
   if adm then
     null;
-  elsif uid = old.requester_id and old.status = 'waiting' and new.status in ('waiting','cancelled') then
-    if new.reject_reason <> old.reject_reason or new.result_note <> old.result_note
-       or new.requester_id is distinct from old.requester_id
-       or new.eta is distinct from old.eta then
+  elsif is_req or is_asg then
+    if new.requester_id is distinct from old.requester_id then
       raise exception 'requester may not change that field' using errcode = '42501';
     end if;
-  elsif uid = old.assignee_id then
-    if new.title <> old.title or new.body <> old.body or new.urgency <> old.urgency
-       or new.deadline is distinct from old.deadline or new.seraph_path <> old.seraph_path
-       or new.project_id <> old.project_id or new.requester_id is distinct from old.requester_id then
+
+    -- 내용은 의뢰자만, 그것도 대기 상태에서만.
+    if content_changed and not (is_req and old.status = 'waiting') then
       raise exception 'assignee may only change status' using errcode = '42501';
     end if;
-    -- 담당자는 언제든 대기/진행중/완료/반려로 바꿀 수 있다. 취소는 의뢰자 전용.
-    if new.status = 'cancelled' then
-      raise exception 'invalid status transition' using errcode = '42501';
+
+    -- 예상 마무리·반려 사유·완료 메모는 담당자만.
+    if (new.eta is distinct from old.eta
+        or new.reject_reason <> old.reject_reason
+        or new.result_note <> old.result_note) and not is_asg then
+      raise exception 'requester may not change that field' using errcode = '42501';
+    end if;
+
+    -- 담당자 바꾸기: 의뢰자는 대기 상태에서만, 담당자는 넘기기로 언제든.
+    if new.assignee_id is distinct from old.assignee_id
+       and not (is_asg or (is_req and old.status = 'waiting')) then
+      raise exception 'not allowed' using errcode = '42501';
+    end if;
+
+    -- 상태: 취소는 의뢰자만(대기에서), 나머지 네 가지는 담당자가 언제든.
+    if new.status <> old.status then
+      if new.status = 'cancelled' then
+        if not (is_req and old.status = 'waiting') then
+          raise exception 'invalid status transition' using errcode = '42501';
+        end if;
+      elsif not is_asg then
+        raise exception 'invalid status transition' using errcode = '42501';
+      end if;
     end if;
   else
     raise exception 'not allowed' using errcode = '42501';
