@@ -870,6 +870,57 @@ test('admin sees 삭제 on a job they neither requested nor are assigned, and ca
   await selectAction(page, 'select[data-action="assignee"]', aUserId);
 });
 
+test('backdrop click dismisses the keyword modal, and it stays dismissed after a background realtime update', async () => {
+  const title = uniq('배경알림K');
+  await closeModalIfOpen(page);
+  await createJobForB(title);
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
+  await page.waitForFunction((t) => Array.from(document.querySelectorAll('.row')).some((r) => r.querySelector('.title')?.textContent === t), { timeout: 15000 }, title);
+
+  await clickAction(page, '[data-action="manage-projects"]');
+  await page.waitForSelector('.list-manage', { timeout: 5000 });
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => document.getElementById('modal-root').hidden, { timeout: 5000 });
+
+  // trigger a realtime change from B's context: starting the job changes its
+  // status, which A's row list (rendered independently of any modal) picks up live.
+  await openAsB(title);
+  await clickAction(pageB, '[data-action="job-start"]');
+  await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
+
+  await page.waitForFunction((t) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === t);
+    return row?.querySelector('.badge')?.textContent === '진행중';
+  }, { timeout: 15000 }, title);
+
+  const stillHidden = await page.evaluate(() => document.getElementById('modal-root').hidden);
+  assert.ok(stillHidden, 'expected the keyword modal to remain closed after a background realtime re-render');
+});
+
+test('backdrop click dismisses the job detail modal, and it stays dismissed after a background realtime update', async () => {
+  const title = uniq('배경알림J');
+  await closeModalIfOpen(page);
+  await createJobForB(title);
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
+  await clickRow(page, title);
+  await page.waitForSelector('.modal', { timeout: 5000 });
+
+  await page.mouse.click(5, 5);
+  await page.waitForFunction(() => document.getElementById('modal-root').hidden, { timeout: 5000 });
+
+  await openAsB(title);
+  await clickAction(pageB, '[data-action="job-start"]');
+  await pageB.waitForFunction(() => document.querySelector('.modal .badge')?.textContent === '진행중', { timeout: 10000 });
+
+  await page.waitForFunction((t) => {
+    const row = Array.from(document.querySelectorAll('.row')).find((r) => r.querySelector('.title')?.textContent === t);
+    return row?.querySelector('.badge')?.textContent === '진행중';
+  }, { timeout: 15000 }, title);
+
+  const stillHidden = await page.evaluate(() => document.getElementById('modal-root').hidden);
+  assert.ok(stillHidden, 'expected the job detail modal to remain closed after a background realtime re-render');
+});
+
 test('no unexpected console errors were captured', () => {
   const unexpected = consoleErrors.filter((e) => !/config\.js/i.test(e) && !/404/i.test(e));
   assert.deepEqual(unexpected, [], `unexpected console errors: ${JSON.stringify(unexpected, null, 2)}`);

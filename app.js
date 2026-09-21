@@ -255,8 +255,13 @@ document.addEventListener('submit', async (e) => {
   } catch (err) { toast(err.message, 'error'); }
   finally { if (btn) btn.disabled = false; }
 });
+// Clicking the backdrop must go through the same logic as the close-modal
+// action (clearing state.modal/openJobId/editingJobId, and reopening the
+// detail view if a job edit was in progress) — not just hide the DOM node.
+// A bare closeModal() here left those state fields set, so the next
+// realtime renderAll() reopened whatever modal the user had just dismissed.
 document.getElementById('modal-root').addEventListener('click', (e) => {
-  if (e.target.id === 'modal-root') closeModal();
+  if (e.target.id === 'modal-root') actions['close-modal']();
 });
 
 let unsubscribe = null;
