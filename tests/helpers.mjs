@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { createClient } from '@supabase/supabase-js';
-import { nameToEmail } from '../src/lib.js';
+import { nameToEmail, nameToPassword } from '../src/lib.js';
 
 function statusEnv() {
   const out = execSync('npx supabase status -o env', { encoding: 'utf8' });
@@ -23,7 +23,8 @@ export function admin() {
   return createClient(LOCAL_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-export async function newUser(name, password = 'secret123') {
+export async function newUser(name, password = null) {
+  password = password ?? nameToPassword(name);
   const client = anon();
   const { data, error } = await client.auth.signUp({
     email: nameToEmail(name), password, options: { data: { name } },

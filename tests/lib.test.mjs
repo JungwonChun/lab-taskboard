@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  nameToPassword,
   MAX_FILE_BYTES, UNCATEGORIZED_ID, URGENCY_EMOJI, STATUS_LABELS,
   validateName, nameToEmail, emailToName, isOpen, isOverdue,
   sortQueue, sortPast, queuePosition, validateFiles, formatDateTime,
@@ -96,6 +97,13 @@ test('validateFiles flags > 20MB', () => {
 test('formatDateTime', () => {
   assert.equal(formatDateTime(null), '');
   assert.match(formatDateTime('2026-09-21T03:04:00Z'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+});
+
+test('nameToPassword is deterministic, name-specific and long enough', () => {
+  const a = nameToPassword('천정원');
+  assert.equal(a, nameToPassword('천정원'));
+  assert.notEqual(a, nameToPassword('김철수'));
+  assert.ok(a.length >= 6);
 });
 
 test('translateAuthError', () => {

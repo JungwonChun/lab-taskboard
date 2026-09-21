@@ -20,6 +20,12 @@ export function nameToEmail(name) {
   return `u-${hex}@${EMAIL_DOMAIN}`;
 }
 
+// 이름만으로 로그인한다. Supabase Auth 는 비밀번호를 요구하므로 이름에서 결정적으로 만들어 쓴다.
+// 이 규칙은 공개된 스크립트에 있으므로 비밀이 아니다. 이름을 아는 사람은 누구나 그 계정으로 들어올 수 있다.
+export function nameToPassword(name) {
+  return `lab-taskboard:${nameToEmail(name)}`;
+}
+
 export function emailToName(email) {
   const m = /^u-([0-9a-f]+)@/.exec(email || '');
   if (!m) return '';

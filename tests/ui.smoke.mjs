@@ -195,10 +195,8 @@ test('shows the auth card on first load', async () => {
 const nameA = uniq('스모크A');
 
 test('sign up user A shows their name in the top bar', async () => {
-  await clickAction(page, '[data-action="auth-mode"][data-mode="signup"]');
-  await page.waitForSelector('form[data-form="auth"][data-mode="signup"]', { timeout: 5000 });
+  await page.waitForSelector('form[data-form="auth"]', { timeout: 5000 });
   await page.type('form[data-form="auth"] input[name="name"]', nameA);
-  await page.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     page.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(page, 'form[data-form="auth"] button.primary'),
@@ -376,10 +374,8 @@ test('sign up user B in a separate browser context', async () => {
 
   await pageB.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   await pageB.waitForSelector('.auth', { timeout: 10000 });
-  await clickAction(pageB, '[data-action="auth-mode"][data-mode="signup"]');
-  await pageB.waitForSelector('form[data-form="auth"][data-mode="signup"]', { timeout: 5000 });
+  await pageB.waitForSelector('form[data-form="auth"]', { timeout: 5000 });
   await pageB.type('form[data-form="auth"] input[name="name"]', nameB);
-  await pageB.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     pageB.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(pageB, 'form[data-form="auth"] button.primary'),
@@ -797,7 +793,6 @@ test('admin panel: no 관리 button before promotion, appears after, lists users
   await pageC.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   await pageC.waitForSelector('.auth', { timeout: 10000 });
   await pageC.type('form[data-form="auth"] input[name="name"]', nameC);
-  await pageC.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     pageC.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(pageC, 'form[data-form="auth"] button.primary'),
@@ -1115,6 +1110,17 @@ test('no unexpected console errors were captured', () => {
   // ERR_FAILED entries are the browser's own console noise from the
   // connection-banner test's deliberate request-interception aborts above —
   // expected, not a real app error.
-  const unexpected = consoleErrors.filter((e) => !/config\.js/i.test(e) && !/404/i.test(e) && !/ERR_FAILED/i.test(e));
+  const benign = (e) => /config\.js/i.test(e) || /404/i.test(e) || /ERR_FAILED/i.test(e);
+
+  // Name-only login probes sign-in first and falls back to sign-up, so the very
+  // first login of each brand-new name logs exactly one 400 from /auth/v1/token.
+  // Three names are created through the form in this suite (A, B, and the
+  // throwaway user in the admin test); anything beyond that is a real error.
+  const FRESH_SIGNUPS = 3;
+  const expected400 = consoleErrors.filter((e) => !benign(e) && /status of 400/.test(e));
+  assert.ok(expected400.length <= FRESH_SIGNUPS,
+    `too many 400s (${expected400.length} > ${FRESH_SIGNUPS}): ${JSON.stringify(expected400, null, 2)}`);
+
+  const unexpected = consoleErrors.filter((e) => !benign(e) && !/status of 400/.test(e));
   assert.deepEqual(unexpected, [], `unexpected console errors: ${JSON.stringify(unexpected, null, 2)}`);
 });

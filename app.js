@@ -1,5 +1,5 @@
 import { createApi } from './src/api.js';
-import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID } from './src/lib.js';
+import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID, nameToPassword } from './src/lib.js';
 import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal, projectOptions, projectsFor } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'queue', assigneeId: undefined, projectFilter: 'all', authMode: 'login', authError: '',
+  view: 'queue', assigneeId: undefined, projectFilter: 'all', authError: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -62,7 +62,7 @@ export function renderMain() {
 
 export function render() {
   if (!state.session || !state.me) {
-    root.innerHTML = renderAuth(state.authMode, state.authError);
+    root.innerHTML = renderAuth('login', state.authError);
     return;
   }
   root.innerHTML = renderShell(state, renderMain());
@@ -105,7 +105,6 @@ document.getElementById('modal-root').addEventListener('focusout', () => {
 
 // ── event wiring (delegated) ──
 export const actions = {
-  'auth-mode': (el) => { state.authMode = el.dataset.mode; state.authError = ''; renderAll(); },
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
   'logout': async () => { await api.signOut(); },
   'new-job': () => { state.modal = null; openModal(renderJobForm(state)); },
@@ -176,19 +175,23 @@ export const changes = {
   },
 };
 export const forms = {
+  // 이름만 받는다: 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
   'auth': async (form) => {
-    const fd = new FormData(form);
-    const v = validateName(fd.get('name'));
+    const v = validateName(new FormData(form).get('name'));
     if (!v.ok) { state.authError = v.error; renderAll(); return; }
+    const pw = nameToPassword(v.name);
     try {
-      if (form.dataset.mode === 'signup') {
-        const data = await api.signUp(v.name, fd.get('password'));
+      try {
+        await api.signIn(v.name, pw);
+      } catch (signInErr) {
+        if (!/틀렸습니다|Invalid login credentials/i.test(signInErr.message)) throw signInErr;
+        const data = await api.signUp(v.name, pw);
         if (!data.session) {
           state.authError = '이메일 확인이 켜져 있어 가입이 완료되지 않았습니다. Supabase → Authentication → Providers → Email에서 Confirm email을 끄세요.';
           renderAll();
           return;
         }
-      } else await api.signIn(v.name, fd.get('password'));
+      }
       state.authError = '';
     } catch (e) {
       state.authError = translateAuthError(e.message);

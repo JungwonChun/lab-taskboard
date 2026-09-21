@@ -4,23 +4,18 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export function renderAuth(mode = 'login', error = '') {
-  const signup = mode === 'signup';
+export function renderAuth(_mode = 'login', error = '') {
   return `
   <div class="auth">
     <h1>Lab Taskboard</h1>
-    <div class="tabs">
-      <button data-action="auth-mode" data-mode="login" class="${signup ? '' : 'active'}">로그인</button>
-      <button data-action="auth-mode" data-mode="signup" class="${signup ? 'active' : ''}">가입</button>
-    </div>
-    <form data-form="auth" data-mode="${mode}">
+    <p class="hint">이름만 치면 들어갑니다. 처음 보는 이름이면 그 자리에서 계정이 만들어집니다.</p>
+    <form data-form="auth">
       <label>이름</label>
-      <input name="name" autocomplete="username" required maxlength="40" placeholder="예: 천정원">
-      <label>비밀번호</label>
-      <input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="6">
+      <input name="name" autocomplete="username" required maxlength="40" placeholder="예: 천정원" autofocus>
       <div class="error">${esc(error)}</div>
-      <button class="primary" style="width:100%;margin-top:8px">${signup ? '가입하기' : '로그인'}</button>
+      <button class="primary" style="width:100%;margin-top:8px">들어가기</button>
     </form>
+    <p class="hint" style="margin-top:14px">이 보드는 주소를 아는 사람이면 누구나 열 수 있습니다. 민감한 내용은 올리지 마세요.</p>
   </div>`;
 }
 
