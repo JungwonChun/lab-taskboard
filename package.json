@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/lib.test.mjs",
+    "test": "node --test tests/lib.test.mjs tests/render.test.mjs",
     "test:rls": "node --test tests/rls.test.mjs",
     "test:ui": "node --test tests/ui.smoke.mjs",
     "serve": "npx --yes serve -l 5500 ."
