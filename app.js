@@ -264,6 +264,19 @@ document.getElementById('modal-root').addEventListener('click', (e) => {
   if (e.target.id === 'modal-root') actions['close-modal']();
 });
 
+let refreshTimer = null;
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(async () => { await refresh(); renderAll(); }, 250);
+}
+
+setInterval(async () => {
+  if (state.session && !document.getElementById('banner').hidden) { await refresh(); renderAll(); }
+}, 30000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.session) scheduleRefresh();
+});
+
 let unsubscribe = null;
 let bootstrapped = false;
 async function onSession(session) {
@@ -278,7 +291,7 @@ async function onSession(session) {
   if (unsubscribe) { unsubscribe(); unsubscribe = null; }
   if (session) {
     await refresh();
-    unsubscribe = api.subscribe(async () => { await refresh(); renderAll(); });
+    unsubscribe = api.subscribe(scheduleRefresh);
   } else {
     Object.assign(state, { me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [], assigneeId: null });
     closeModal();

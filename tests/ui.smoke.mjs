@@ -921,7 +921,109 @@ test('backdrop click dismisses the job detail modal, and it stays dismissed afte
   assert.ok(stillHidden, 'expected the job detail modal to remain closed after a background realtime re-render');
 });
 
+test('realtime debounce: two rapid comments from B both land in A\'s open modal', async () => {
+  // Two mutations fired back-to-back, well inside the 250ms debounce window
+  // (see app.js scheduleRefresh). A's page is never reloaded here — only the
+  // realtime subscription's debounced refresh can bring these in — so this
+  // is a correctness check that the debounce coalesces bursts without
+  // dropping the last event, not a call-count check.
+  const job6Title = uniq('작업6');
+  await closeModalIfOpen(page);
+  await createJobForB(job6Title);
+
+  await clickAction(page, '[data-action="view"][data-view="sent"]');
+  await clickRow(page, job6Title);
+  await page.waitForSelector('.modal', { timeout: 5000 });
+
+  await openAsB(job6Title);
+
+  // Set the textarea's value and click submit inside one evaluate() call
+  // (rather than page.type() + a separate clickAction()): B's own realtime
+  // echo of her own two inserts can reopen her modal (a fresh
+  // renderJobDetail()) between the two mutations, and a multi-step
+  // type-then-click sequence can lose keystrokes or the focused element to
+  // that swap. A single synchronous evaluate() can't observe a
+  // half-replaced tree, matching the pattern clickAction()/clickRow() use
+  // above for the same reason.
+  // Waits for the submit button to be enabled (see app.js's submit
+  // listener: it disables button.primary for the duration of the
+  // await fn(form) + refresh() + renderAll() sequence) before writing to it
+  // — the previous submission's post-mutation renderAll() replaces the whole
+  // form with a fresh one, and clicking a disabled button is a silent no-op,
+  // which is why firing this twice with no wait in between only produced one
+  // POST. Then waits for B's own comment list to show the just-posted text,
+  // confirming this submission's own refresh()/renderAll() round-trip
+  // finished before the next call runs.
+  async function postCommentAsB(text) {
+    await pageB.waitForSelector('form[data-form="comment"] textarea[name="body"]', { timeout: 10000 });
+    await pageB.waitForFunction(() => {
+      const btn = document.querySelector('form[data-form="comment"] button.primary');
+      return !!btn && !btn.disabled;
+    }, { timeout: 10000 });
+    const ok = await pageB.evaluate((body) => {
+      const form = document.querySelector('form[data-form="comment"]');
+      if (!form) return false;
+      form.querySelector('textarea[name="body"]').value = body;
+      const btn = form.querySelector('button.primary');
+      btn.focus();
+      btn.click();
+      return true;
+    }, text);
+    assert.ok(ok, 'expected to find and submit the comment form');
+    await pageB.waitForFunction((t) =>
+      Array.from(document.querySelectorAll('.comments li .text')).some((el) => el.textContent === t),
+      { timeout: 10000 }, text);
+  }
+
+  const c1 = uniq('댓글빠1');
+  const c2 = uniq('댓글빠2');
+  await postCommentAsB(c1);
+  await postCommentAsB(c2);
+
+  await page.waitForFunction((t1, t2) => {
+    const texts = Array.from(document.querySelectorAll('.comments li .text')).map((el) => el.textContent);
+    return texts.includes(t1) && texts.includes(t2);
+  }, { timeout: 15000 }, c1, c2);
+});
+
+test('connection banner: a REST outage shows it, recovery hides it and reloads data', async () => {
+  // Simulates an outage without touching the Supabase stack (other tests
+  // depend on it staying up): intercept and abort every /rest/v1/ request
+  // from A's page, then drive the same path a real tab-focus takes by
+  // dispatching visibilitychange — scheduleRefresh() -> refresh() -> the
+  // aborted requests make loadAll() reject -> setBanner(...).
+  await closeModalIfOpen(page);
+  await reloadAndWaitReady(page);
+
+  let blocking = true;
+  const onRequest = (req) => {
+    if (blocking && req.url().includes('/rest/v1/')) req.abort();
+    else req.continue();
+  };
+  await page.setRequestInterception(true);
+  page.on('request', onRequest);
+
+  try {
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => {
+      const b = document.getElementById('banner');
+      return !b.hidden && b.textContent.includes('서버에 연결할 수 없습니다');
+    }, { timeout: 10000 });
+
+    blocking = false;
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.waitForFunction(() => document.getElementById('banner').hidden, { timeout: 10000 });
+    await page.waitForSelector('.rows', { timeout: 10000 });
+  } finally {
+    page.off('request', onRequest);
+    await page.setRequestInterception(false);
+  }
+});
+
 test('no unexpected console errors were captured', () => {
-  const unexpected = consoleErrors.filter((e) => !/config\.js/i.test(e) && !/404/i.test(e));
+  // ERR_FAILED entries are the browser's own console noise from the
+  // connection-banner test's deliberate request-interception aborts above —
+  // expected, not a real app error.
+  const unexpected = consoleErrors.filter((e) => !/config\.js/i.test(e) && !/404/i.test(e) && !/ERR_FAILED/i.test(e));
   assert.deepEqual(unexpected, [], `unexpected console errors: ${JSON.stringify(unexpected, null, 2)}`);
 });
