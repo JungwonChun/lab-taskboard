@@ -6,7 +6,8 @@
     "test": "node --test tests/lib.test.mjs tests/render.test.mjs",
     "test:rls": "node --test tests/rls.test.mjs",
     "test:ui": "node --test tests/ui.smoke.mjs",
-    "serve": "npx --yes serve -l 5500 ."
+    "serve": "npx --yes serve -l 5500 .",
+    "build:setup": "./scripts_build_setup.sh"
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.45.0",
