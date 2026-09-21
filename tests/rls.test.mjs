@@ -227,6 +227,20 @@ test('a normal user cannot self-promote via profiles update (no update policy)',
   assert.equal(after.data.is_admin, false);
 });
 
+test('의뢰가 딸린 계정을 지워도 연쇄 갱신이 트리거에 막히지 않는다', async () => {
+  // SQL 편집기·service_role 은 auth.uid() 가 없다. 이 경로로 계정을 지우면
+  // jobs.requester_id 가 ON DELETE SET NULL 로 갱신되는데, 예전에는 그 갱신을
+  // 트리거가 사용자 행동으로 보고 'not allowed' 로 막아 설정 SQL 전체가 실패했다.
+  const { A, B, apiA } = await pair();
+  const job = await apiA.createJob({ assignee_id: B.user.id, title: '연쇄삭제' });
+  const a = admin();
+  const { error } = await a.auth.admin.deleteUser(A.user.id);
+  assert.equal(error, null, `계정 삭제가 막히면 안 된다: ${error?.message}`);
+  const { data } = await a.from('jobs').select('requester_id').eq('id', job.id).single();
+  assert.equal(data.requester_id, null, '의뢰는 남고 의뢰자만 비워져야 한다');
+  await a.from('jobs').delete().eq('id', job.id);
+});
+
 test('admin_delete_user removes auth user; non-admin refused', async () => {
   const { A, B, apiA } = await pair();
   await assert.rejects(apiA.adminDeleteUser(B.user.id), (e) => e.code === '42501');

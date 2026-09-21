@@ -147,9 +147,15 @@ declare
     or new.deadline is distinct from old.deadline or new.seraph_path <> old.seraph_path
     or new.project_id <> old.project_id;
 begin
+  -- auth.uid() 가 없다 = 사용자의 웹 요청이 아니다.
+  -- SQL 편집기, service_role, 그리고 계정 삭제 시 ON DELETE SET NULL 연쇄가 여기 해당한다.
+  -- (웹에서 온 요청은 RLS 가 이미 로그인 사용자로 한정하므로 여기까지 오지 못한다.)
+  -- 이런 시스템 경로는 권한 검사를 건너뛴다. 아래 타임스탬프 정리는 그대로 탄다.
+  if uid is null then
+    null;
   -- 한 사람이 의뢰자이면서 담당자일 수 있다(자기 자신에게 맡긴 일). 그래서
   -- 둘 중 하나를 고르지 않고, 각 필드마다 "그 필드를 만질 수 있는 역할"을 따진다.
-  if adm then
+  elsif adm then
     null;
   elsif is_req or is_asg then
     if new.requester_id is distinct from old.requester_id then
@@ -188,7 +194,7 @@ begin
     raise exception 'not allowed' using errcode = '42501';
   end if;
 
-  if new.status = 'rejected' and length(trim(new.reject_reason)) = 0 then
+  if uid is not null and new.status = 'rejected' and length(trim(new.reject_reason)) = 0 then
     raise exception 'reject_reason required' using errcode = '23514';
   end if;
 
