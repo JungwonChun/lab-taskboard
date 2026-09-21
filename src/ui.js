@@ -4,20 +4,26 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export function renderAuth(_mode = 'login', error = '') {
+export function renderAuth(mode = 'login', error = '') {
+  const signup = mode === 'signup';
   return `
   <div class="auth">
     <h1>Lab Taskboard</h1>
-    <p class="hint">이름과 비밀번호를 넣으세요. 처음 보는 이름이면 그 자리에서 계정이 만들어집니다.</p>
-    <form data-form="auth">
+    <div class="tabs">
+      <button data-action="auth-mode" data-mode="login" class="${signup ? '' : 'active'}">로그인</button>
+      <button data-action="auth-mode" data-mode="signup" class="${signup ? 'active' : ''}">가입</button>
+    </div>
+    <form data-form="auth" data-mode="${mode}">
       <label>이름</label>
       <input name="name" autocomplete="username" required maxlength="40" placeholder="예: 천정원" autofocus>
       <label>비밀번호 (6자 이상)</label>
-      <input name="password" type="password" autocomplete="current-password" required minlength="6">
+      <input name="password" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" required minlength="6">
       <div class="error">${esc(error)}</div>
-      <button class="primary" style="width:100%;margin-top:8px">들어가기</button>
+      <button class="primary" style="width:100%;margin-top:8px">${signup ? '가입하기' : '로그인'}</button>
     </form>
-    <p class="hint" style="margin-top:14px">비밀번호를 잊으면 관리자가 Supabase → Authentication → Users 에서 그 계정을 지워야 합니다.</p>
+    <p class="hint" style="margin-top:14px">${signup
+      ? '이미 있는 이름은 쓸 수 없습니다. 이미 가입했다면 로그인 탭으로 가세요.'
+      : '아직 계정이 없으면 가입 탭에서 만드세요.'}</p>
   </div>`;
 }
 

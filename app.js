@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '',
+  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authMode: 'login', authError: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -63,7 +63,7 @@ export function renderMain() {
 
 export function render() {
   if (!state.session || !state.me) {
-    root.innerHTML = renderAuth('login', state.authError);
+    root.innerHTML = renderAuth(state.authMode, state.authError);
     return;
   }
   root.innerHTML = renderShell(state, renderMain());
@@ -107,6 +107,7 @@ document.getElementById('modal-root').addEventListener('focusout', () => {
 // ── event wiring (delegated) ──
 export const actions = {
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
+  'auth-mode': (el) => { state.authMode = el.dataset.mode; state.authError = ''; renderAll(); },
   'logout': async () => { await api.signOut(); },
   'new-job': () => { state.modal = null; openModal(renderJobForm(state)); },
   // While editing (state.editingJobId set), 닫기/✕ should return to the
@@ -186,32 +187,23 @@ export const changes = {
 export const forms = {
   // 이름만 받는다: 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
   // 이름 + 비밀번호. 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
+  // 로그인 탭은 로그인만, 가입 탭은 가입만 한다.
   'auth': async (form) => {
     const fd = new FormData(form);
     const v = validateName(fd.get('name'));
     if (!v.ok) { state.authError = v.error; renderAll(); return; }
     const pw = String(fd.get('password') || '');
+    const signup = form.dataset.mode === 'signup';
     try {
-      try {
-        await api.signIn(v.name, pw);
-      } catch (signInErr) {
-        if (!/틀렸습니다|Invalid login credentials/i.test(signInErr.message)) throw signInErr;
-        let data;
-        try {
-          data = await api.signUp(v.name, pw);
-        } catch (signUpErr) {
-          if (/이미 있는 이름|already registered|already exists/i.test(signUpErr.message)) {
-            state.authError = '이미 있는 이름입니다. 비밀번호를 다시 확인하세요.';
-            renderAll();
-            return;
-          }
-          throw signUpErr;
-        }
+      if (signup) {
+        const data = await api.signUp(v.name, pw);
         if (!data.session) {
           state.authError = '이메일 확인이 켜져 있어 가입이 완료되지 않았습니다. Supabase → Authentication → Providers → Email에서 Confirm email을 끄세요.';
           renderAll();
           return;
         }
+      } else {
+        await api.signIn(v.name, pw);
       }
       state.authError = '';
     } catch (e) {

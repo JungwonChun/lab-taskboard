@@ -15,6 +15,14 @@ jobs:
           mkdir -p _site
           cp -r index.html style.css app.js src _site/
           cp .nojekyll _site/ 2>/dev/null || true
+          # GitHub Pages 는 파일을 10분간 캐시한다. 배포마다 커밋 SHA 를 쿼리로 붙여
+          # 브라우저가 옛 파일을 계속 쓰는 일이 없게 한다 (index.html 은 캐시되지 않는다).
+          V="${GITHUB_SHA::12}"
+          sed -i "s|\(src=\"app\.js\)\"|\1?v=$V\"|; s|\(href=\"style\.css\)\"|\1?v=$V\"|; s|\(src=\"config\.js\)\"|\1?v=$V\"|" _site/index.html
+          sed -i "s|\(from '\./src/[a-z]*\.js\)'|\1?v=$V'|g" _site/app.js
+          sed -i "s|\(from '\./[a-z]*\.js\)'|\1?v=$V'|g" _site/src/*.js
+          echo '--- index.html ---'; grep -E 'app\.js|style\.css|config\.js' _site/index.html
+          echo '--- app.js imports ---'; grep -E "^import" _site/app.js
       - name: Write config.js
         # The Variables come in only through `env:`, never interpolated
         # directly into the run script's text (`${{ vars.X }}` inline would
