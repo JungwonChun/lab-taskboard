@@ -1,0 +1,14 @@
+{
+  "name": "lab-taskboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/lib.test.mjs",
+    "test:rls": "node --test tests/rls.test.mjs",
+    "serve": "npx --yes serve -l 5500 ."
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "supabase": "^1.200.0"
+  }
+}
