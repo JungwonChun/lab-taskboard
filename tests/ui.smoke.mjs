@@ -205,6 +205,7 @@ const nameA = uniq('스모크A');
 test('sign up user A shows their name in the top bar', async () => {
   await page.waitForSelector('form[data-form="auth"]', { timeout: 5000 });
   await page.type('form[data-form="auth"] input[name="name"]', nameA);
+  await page.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     page.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(page, 'form[data-form="auth"] button.primary'),
@@ -385,6 +386,7 @@ test('sign up user B in a separate browser context', async () => {
   await pageB.waitForSelector('.auth', { timeout: 10000 });
   await pageB.waitForSelector('form[data-form="auth"]', { timeout: 5000 });
   await pageB.type('form[data-form="auth"] input[name="name"]', nameB);
+  await pageB.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     pageB.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(pageB, 'form[data-form="auth"] button.primary'),
@@ -803,6 +805,7 @@ test('admin panel: no 관리 button before promotion, appears after, lists users
   await pageC.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
   await pageC.waitForSelector('.auth', { timeout: 10000 });
   await pageC.type('form[data-form="auth"] input[name="name"]', nameC);
+  await pageC.type('form[data-form="auth"] input[name="password"]', 'secret123');
   await Promise.all([
     pageC.waitForSelector('.topbar .me', { timeout: 15000 }),
     clickAction(pageC, 'form[data-form="auth"] button.primary'),

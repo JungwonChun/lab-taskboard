@@ -1,5 +1,5 @@
 import { createApi } from './src/api.js';
-import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID, nameToPassword } from './src/lib.js';
+import { validateName, translateAuthError, displayName, validateFiles, UNCATEGORIZED_ID } from './src/lib.js';
 import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal, renderJobDetail, inlineForm, renderProjectsModal, renderAdminModal, projectOptions, projectsFor, renderDashboard } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
@@ -9,7 +9,7 @@ const root = document.getElementById('app');
 
 export const state = {
   session: null, me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [],
-  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '', legacyName: '',
+  view: 'dashboard', assigneeId: undefined, projectFilter: 'all', authError: '',
   openJobId: null, editingJobId: null, modal: null,
 };
 let attUrls = {};
@@ -63,7 +63,7 @@ export function renderMain() {
 
 export function render() {
   if (!state.session || !state.me) {
-    root.innerHTML = renderAuth('login', state.authError, state.legacyName);
+    root.innerHTML = renderAuth('login', state.authError);
     return;
   }
   root.innerHTML = renderShell(state, renderMain());
@@ -107,7 +107,6 @@ document.getElementById('modal-root').addEventListener('focusout', () => {
 // ── event wiring (delegated) ──
 export const actions = {
   'view': (el) => { state.view = el.dataset.view; renderAll(); },
-  'auth-cancel-migrate': () => { state.legacyName = ''; state.authError = ''; renderAll(); },
   'logout': async () => { await api.signOut(); },
   'new-job': () => { state.modal = null; openModal(renderJobForm(state)); },
   // While editing (state.editingJobId set), 닫기/✕ should return to the
@@ -186,31 +185,12 @@ export const changes = {
 };
 export const forms = {
   // 이름만 받는다: 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
-  // 예전 비밀번호로 한 번 들어간 뒤, 이름에서 만든 비밀번호로 바꿔 끼운다.
-  'migrate': async (form) => {
-    const name = state.legacyName;
-    const oldPw = String(new FormData(form).get('password') || '');
-    try {
-      await api.signIn(name, oldPw);
-    } catch {
-      state.authError = '예전 비밀번호가 맞지 않습니다';
-      renderAll();
-      return;
-    }
-    try {
-      await api.updatePassword(nameToPassword(name));
-      state.legacyName = '';
-      state.authError = '';
-      toast('이제부터 이름만으로 들어갑니다');
-    } catch (e) {
-      state.authError = translateAuthError(e.message);
-      renderAll();
-    }
-  },
+  // 이름 + 비밀번호. 계정이 있으면 로그인, 없으면 그 자리에서 만든다.
   'auth': async (form) => {
-    const v = validateName(new FormData(form).get('name'));
+    const fd = new FormData(form);
+    const v = validateName(fd.get('name'));
     if (!v.ok) { state.authError = v.error; renderAll(); return; }
-    const pw = nameToPassword(v.name);
+    const pw = String(fd.get('password') || '');
     try {
       try {
         await api.signIn(v.name, pw);
@@ -220,10 +200,8 @@ export const forms = {
         try {
           data = await api.signUp(v.name, pw);
         } catch (signUpErr) {
-          // 이름은 이미 쓰이는데 파생 비밀번호로는 못 들어간다 = 예전 비밀번호로 만든 계정.
           if (/이미 있는 이름|already registered|already exists/i.test(signUpErr.message)) {
-            state.legacyName = v.name;
-            state.authError = '';
+            state.authError = '이미 있는 이름입니다. 비밀번호를 다시 확인하세요.';
             renderAll();
             return;
           }
@@ -236,26 +214,11 @@ export const forms = {
         }
       }
       state.authError = '';
-      state.legacyName = '';
     } catch (e) {
       state.authError = translateAuthError(e.message);
       renderAll();
     }
   },
-  // form.reset() before the outer listener's renderAll(): without it the
-  // memo/reason textarea still holds its typed value when modalHasDraft()
-  // runs, which reads as an unsaved draft and blocks the re-render that
-  // would otherwise replace this inline form with the updated detail view —
-  // permanently, since nothing else ever asks it to look again.
-  'done': async (form) => { await api.finishJob(state.openJobId, String(new FormData(form).get('result_note') || '')); form.reset(); toast('완료 처리했습니다'); },
-  'reject': async (form) => { await api.rejectJob(state.openJobId, String(new FormData(form).get('reject_reason') || '').trim()); form.reset(); toast('반려했습니다'); },
-  'eta': async (form) => {
-    const v = new FormData(form).get('eta');
-    await api.setEta(state.openJobId, v ? new Date(v).toISOString() : null);
-    toast(v ? '예상 마무리를 저장했습니다' : '예상 마무리를 지웠습니다');
-  },
-  'handoff': async (form) => { await api.handoffJob(state.openJobId, new FormData(form).get('assignee_id')); toast('넘겼습니다'); },
-  'comment': async (form) => { await api.addComment(state.openJobId, String(new FormData(form).get('body')).trim()); form.reset(); },
 };
 
 async function resolveProject(fd, assigneeId) {

@@ -4,35 +4,20 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-export function renderAuth(_mode = 'login', error = '', legacyName = '') {
-  // legacyName 이 있으면, 예전 비밀번호 방식으로 만들어진 계정이라 한 번만 옛 비밀번호를 받는다.
-  if (legacyName) {
-    return `
-  <div class="auth">
-    <h1>Lab Taskboard</h1>
-    <p class="hint"><b>${esc(legacyName)}</b> 계정은 예전 비밀번호 방식으로 만들어졌습니다.
-    그때 쓰던 비밀번호를 한 번만 넣어주세요. 이후로는 이름만으로 들어갑니다.</p>
-    <form data-form="migrate">
-      <label>${esc(legacyName)} 의 예전 비밀번호</label>
-      <input name="password" type="password" required minlength="6" autofocus>
-      <div class="error">${esc(error)}</div>
-      <button class="primary" style="width:100%;margin-top:8px">바꾸고 들어가기</button>
-    </form>
-    <p class="hint" style="margin-top:12px">비밀번호가 기억나지 않으면 관리자가 Supabase → Authentication → Users 에서 그 계정을 지우면 됩니다. 지운 뒤 같은 이름으로 다시 들어오면 새로 만들어집니다.</p>
-    <button data-action="auth-cancel-migrate" style="width:100%;margin-top:8px">다른 이름으로 들어가기</button>
-  </div>`;
-  }
+export function renderAuth(_mode = 'login', error = '') {
   return `
   <div class="auth">
     <h1>Lab Taskboard</h1>
-    <p class="hint">이름만 치면 들어갑니다. 처음 보는 이름이면 그 자리에서 계정이 만들어집니다.</p>
+    <p class="hint">이름과 비밀번호를 넣으세요. 처음 보는 이름이면 그 자리에서 계정이 만들어집니다.</p>
     <form data-form="auth">
       <label>이름</label>
       <input name="name" autocomplete="username" required maxlength="40" placeholder="예: 천정원" autofocus>
+      <label>비밀번호 (6자 이상)</label>
+      <input name="password" type="password" autocomplete="current-password" required minlength="6">
       <div class="error">${esc(error)}</div>
       <button class="primary" style="width:100%;margin-top:8px">들어가기</button>
     </form>
-    <p class="hint" style="margin-top:14px">이 보드는 주소를 아는 사람이면 누구나 열 수 있습니다. 민감한 내용은 올리지 마세요.</p>
+    <p class="hint" style="margin-top:14px">비밀번호를 잊으면 관리자가 Supabase → Authentication → Users 에서 그 계정을 지워야 합니다.</p>
   </div>`;
 }
 
