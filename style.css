@@ -51,6 +51,7 @@ h2 { font-size: 16px; margin: 18px 0 8px; }
 details.past summary { cursor: pointer; color: var(--muted); margin: 16px 0 8px; }
 
 #modal-root { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: flex-start; justify-content: center; padding: 5vh 12px; overflow: auto; z-index: 10; }
+#modal-root[hidden] { display: none; }
 .modal { background: var(--card); border-radius: var(--radius); width: 100%; max-width: 720px; padding: 20px 22px; border: 1px solid var(--line); }
 .modal h3 { margin: 0 0 12px; font-size: 18px; }
 .modal .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }

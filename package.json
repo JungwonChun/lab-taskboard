@@ -5,10 +5,12 @@
   "scripts": {
     "test": "node --test tests/lib.test.mjs",
     "test:rls": "node --test tests/rls.test.mjs",
+    "test:ui": "node --test tests/ui.smoke.mjs",
     "serve": "npx --yes serve -l 5500 ."
   },
   "devDependencies": {
     "@supabase/supabase-js": "^2.45.0",
+    "puppeteer-core": "^25.11.0",
     "supabase": "^1.200.0"
   }
 }

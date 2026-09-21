@@ -1,6 +1,6 @@
 import { createApi } from './src/api.js';
-import { validateName, translateAuthError } from './src/lib.js';
-import { renderAuth, renderShell, toast, setBanner, closeModal } from './src/ui.js';
+import { validateName, translateAuthError, validateFiles } from './src/lib.js';
+import { renderAuth, renderShell, toast, setBanner, closeModal, renderQueue, renderSent, renderJobForm, openModal } from './src/ui.js';
 
 const cfg = window.TASKBOARD_CONFIG;
 const client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
@@ -23,8 +23,8 @@ async function refresh() {
   }
 }
 
-export function renderMain() {            // replaced in Task 5
-  return '<div class="empty">아직 화면이 없습니다</div>';
+export function renderMain() {
+  return state.view === 'sent' ? renderSent(state) : renderQueue(state);
 }
 
 export function render() {
@@ -40,6 +40,8 @@ export const actions = {
   'auth-mode': (el) => { state.authMode = el.dataset.mode; state.authError = ''; render(); },
   'view': (el) => { state.view = el.dataset.view; render(); },
   'logout': async () => { await api.signOut(); },
+  'new-job': () => openModal(renderJobForm(state)),
+  'close-modal': () => closeModal(),
 };
 export const changes = {
   'assignee': (el) => { state.assigneeId = el.value; render(); },
@@ -60,6 +62,42 @@ export const forms = {
     }
   },
 };
+
+async function resolveProject(fd) {
+  const name = String(fd.get('new_project') || '').trim();
+  if (!name) return fd.get('project_id');
+  const existing = state.projects.find(p => p.name === name);
+  if (existing) return existing.id;
+  const p = await api.addProject(name);
+  return p.id;
+}
+
+forms['job'] = async (form) => {
+  const fd = new FormData(form);
+  const files = fd.getAll('files').filter(f => f && f.size > 0);
+  const chk = validateFiles(files);
+  if (!chk.ok) { toast(`20MB 초과: ${chk.tooLarge.join(', ')}`, 'error'); return; }
+  const fields = {
+    assignee_id: fd.get('assignee_id'),
+    project_id: await resolveProject(fd),
+    title: String(fd.get('title')).trim(),
+    body: String(fd.get('body') || ''),
+    urgency: Number(fd.get('urgency') || 3),
+    deadline: fd.get('deadline') ? new Date(fd.get('deadline')).toISOString() : null,
+    seraph_path: String(fd.get('seraph_path') || '').trim(),
+  };
+  const id = form.dataset.id;
+  const job = id ? await api.updateJob(id, fields) : await api.createJob(fields);
+  const failed = [];
+  for (const f of files) {
+    try { await api.uploadAttachment(job.id, 'request', f); } catch (e) { failed.push(`${f.name} (${e.message})`); }
+  }
+  closeModal();
+  await refresh(); render();
+  toast(id ? '수정했습니다' : `의뢰를 제출했습니다 (${displayNameOf(job.assignee_id)} 큐)`);
+  if (failed.length) toast(`첨부 실패: ${failed.join('; ')} — 상세 화면에서 다시 올릴 수 있습니다`, 'error');
+};
+function displayNameOf(id) { return state.profiles.find(p => p.id === id)?.name ?? '탈퇴자'; }
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
