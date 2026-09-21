@@ -132,7 +132,7 @@ export const actions = {
   'job-eta-clear': async () => { await api.setEta(state.openJobId, null); toast('예상 마무리를 지웠습니다'); },
   'goto-queue': (el) => {
     state.view = 'queue';
-    state.assigneeId = el.dataset.id;
+    state.assigneeId = el.dataset.id === '__unassigned__' ? null : el.dataset.id;
     state.projectFilter = 'all';
     renderAll();
   },

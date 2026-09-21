@@ -156,13 +156,21 @@ test('dashboardStats counts the piles and ranks people by open load', () => {
   const st = dashboardStats(jobs, [{ id: A, name: '가' }, { id: B, name: '나' }]);
   const stWithIdle = dashboardStats(jobs, [{ id: A, name: '가' }, { id: B, name: '나' }, { id: 'zzz', name: '신입' }]);
   assert.ok(stWithIdle.perPerson.some(p => p.name === '신입'), '일이 없는 신규 가입자도 표에 나와야 한다');
+  assert.ok(!dashboardStats([], [{ id: A, name: '가' }]).perPerson.some(p => p.name === '미배정'),
+    '미배정 건이 없으면 그 줄은 나오지 않는다');
   assert.equal(st.waiting, 4);
   assert.equal(st.in_progress, 1);
   assert.equal(st.done, 1);
   assert.equal(st.rejected, 1);
   assert.equal(st.overdue, 1);
   assert.equal(st.unassigned, 1);
-  assert.deepEqual(st.perPerson.map(p => p.name), ['가', '나']);   // 가: 3 open, 나: 1 open (일 없는 사람도 포함된다)
+  // 가: 3 open, 나: 1 open, 그리고 담당자 없는 1건은 '미배정' 줄로 맨 뒤에
+  assert.deepEqual(st.perPerson.map(p => p.name), ['가', '나', '미배정']);
+  // 표 합계는 위 타일과 반드시 맞아야 한다
+  const sum = (k) => st.perPerson.reduce((a, r) => a + r[k], 0);
+  assert.equal(sum('waiting'), st.waiting, '대기 합계가 타일과 달라졌다');
+  assert.equal(sum('in_progress'), st.in_progress, '진행중 합계가 타일과 달라졌다');
+  assert.equal(sum('done'), st.done, '완료 합계가 타일과 달라졌다');
   assert.equal(st.perPerson[0].waiting, 2);
   assert.equal(st.perPerson[1].overdue, 1);
 });

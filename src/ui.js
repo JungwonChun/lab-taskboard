@@ -125,12 +125,12 @@ export function renderDashboard(state) {
       ${note ? `<div class="tile-note">${esc(note)}</div>` : ''}
     </div>`;
   const rows = st.perPerson.map((r) => `
-    <tr>
+    <tr class="${r.id ? '' : 'orphan'}">
       <td>${esc(r.name)}</td>
       <td class="num">${r.waiting}</td>
       <td class="num">${r.in_progress}</td>
       <td class="num">${r.done}</td>
-      <td><button data-action="goto-queue" data-id="${r.id}">큐 보기</button></td>
+      <td><button data-action="goto-queue" data-id="${r.id ?? '__unassigned__'}">큐 보기</button></td>
     </tr>`).join('');
   return `
   <div class="head-row"><h2>대시보드</h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>

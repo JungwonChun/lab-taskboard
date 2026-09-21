@@ -111,3 +111,4 @@ table.stats td button { padding: 3px 10px; font-size: 12px; }
 /* 제목 줄 오른쪽에 붙는 기본 동작 버튼 (새 의뢰) */
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .head-row h2 { margin: 18px 0 8px; }
+table.stats tr.orphan td:first-child { color: var(--muted); font-style: italic; }

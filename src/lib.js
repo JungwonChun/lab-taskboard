@@ -119,6 +119,17 @@ export function dashboardStats(jobs, profiles) {
   }));
   // 일이 없는 사람도 표에 남긴다 — 새로 가입하면 바로 보여야 한다.
   perPerson.sort((a, b) => (b.waiting + b.in_progress) - (a.waiting + a.in_progress) || a.name.localeCompare(b.name));
+  // 담당자가 지워진 의뢰는 어느 사람 줄에도 안 들어간다. 그대로 두면 표 합계가
+  // 위 타일과 어긋나므로, 있을 때만 '미배정' 줄을 맨 뒤에 붙인다.
+  const orphan = {
+    id: null,
+    name: '미배정',
+    waiting: count((j) => j.assignee_id == null && j.status === 'waiting'),
+    in_progress: count((j) => j.assignee_id == null && j.status === 'in_progress'),
+    done: count((j) => j.assignee_id == null && j.status === 'done'),
+    overdue: count((j) => j.assignee_id == null && isOverdue(j, now)),
+  };
+  if (orphan.waiting + orphan.in_progress + orphan.done > 0) perPerson.push(orphan);
   return {
     waiting: count((j) => j.status === 'waiting'),
     in_progress: count((j) => j.status === 'in_progress'),
