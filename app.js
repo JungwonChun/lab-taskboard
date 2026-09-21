@@ -340,7 +340,7 @@ async function onSession(session) {
     await refresh();
     unsubscribe = api.subscribe(scheduleRefresh, onRealtimeStatus);
   } else {
-    Object.assign(state, { me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [], assigneeId: undefined });
+    Object.assign(state, { me: null, profiles: [], projects: [], jobs: [], attachments: [], comments: [], assigneeId: undefined, authMode: 'login', authError: '', view: 'dashboard', projectFilter: 'all' });
     closeModal();
   }
   renderAll();
