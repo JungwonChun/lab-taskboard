@@ -211,6 +211,21 @@ export const forms = {
       renderAll();
     }
   },
+  // form.reset() before the outer listener's renderAll(): without it the
+  // memo/reason textarea still holds its typed value when modalHasDraft()
+  // runs, which reads as an unsaved draft and blocks the re-render that
+  // would otherwise replace this inline form with the updated detail view —
+  // permanently, since nothing else ever asks it to look again.
+  'done': async (form) => { await api.finishJob(state.openJobId, String(new FormData(form).get('result_note') || '')); form.reset(); toast('완료 처리했습니다'); },
+  'reject': async (form) => { await api.rejectJob(state.openJobId, String(new FormData(form).get('reject_reason') || '').trim()); form.reset(); toast('반려했습니다'); },
+  'eta': async (form) => {
+    const v = new FormData(form).get('eta');
+    await api.setEta(state.openJobId, v ? new Date(v).toISOString() : null);
+    form.reset();
+    toast(v ? '예상 마무리를 저장했습니다' : '예상 마무리를 지웠습니다');
+  },
+  'handoff': async (form) => { await api.handoffJob(state.openJobId, new FormData(form).get('assignee_id')); toast('넘겼습니다'); },
+  'comment': async (form) => { await api.addComment(state.openJobId, String(new FormData(form).get('body')).trim()); form.reset(); },
 };
 
 async function resolveProject(fd, assigneeId) {

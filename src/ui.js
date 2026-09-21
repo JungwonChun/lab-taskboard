@@ -130,7 +130,6 @@ export function renderDashboard(state) {
       <td class="num">${r.waiting}</td>
       <td class="num">${r.in_progress}</td>
       <td class="num">${r.done}</td>
-      <td class="num ${r.overdue ? 'over' : ''}">${r.overdue || '·'}</td>
       <td><button data-action="goto-queue" data-id="${r.id}">큐 보기</button></td>
     </tr>`).join('');
   return `
@@ -140,16 +139,11 @@ export function renderDashboard(state) {
     ${tile('진행중', st.in_progress, '지금 누군가 붙잡고 있는 일')}
     ${tile('총 처리량', st.done, '지금까지 완료된 누적 건수')}
   </div>
-  <div class="tiles small">
-    ${tile('마감 지남', st.overdue, '열려 있는데 마감이 지난 건', st.overdue ? 'warn' : '')}
-    ${tile('반려', st.rejected, '')}
-    ${tile('미배정', st.unassigned, '담당자가 없는 열린 건', st.unassigned ? 'warn' : '')}
-  </div>
   <h2>사람별 현황</h2>
   ${rows ? `<div class="table-wrap"><table class="stats">
-    <thead><tr><th>이름</th><th class="num">대기</th><th class="num">진행중</th><th class="num">완료</th><th class="num">마감 지남</th><th></th></tr></thead>
+    <thead><tr><th>이름</th><th class="num">대기</th><th class="num">진행중</th><th class="num">완료</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>` : '<div class="empty">아직 의뢰가 없습니다</div>'}`;
+  </table></div>` : '<div class="empty">아직 가입한 사람이 없습니다</div>'}`;
 }
 
 export function renderQueue(state) {

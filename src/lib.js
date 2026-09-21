@@ -116,7 +116,8 @@ export function dashboardStats(jobs, profiles) {
     in_progress: count((j) => j.assignee_id === p.id && j.status === 'in_progress'),
     done: count((j) => j.assignee_id === p.id && j.status === 'done'),
     overdue: count((j) => j.assignee_id === p.id && isOverdue(j, now)),
-  })).filter((r) => r.waiting + r.in_progress + r.done + r.overdue > 0);
+  }));
+  // 일이 없는 사람도 표에 남긴다 — 새로 가입하면 바로 보여야 한다.
   perPerson.sort((a, b) => (b.waiting + b.in_progress) - (a.waiting + a.in_progress) || a.name.localeCompare(b.name));
   return {
     waiting: count((j) => j.status === 'waiting'),

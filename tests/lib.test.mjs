@@ -154,13 +154,15 @@ test('dashboardStats counts the piles and ranks people by open load', () => {
     j({ id: '7', assignee_id: null }),
   ];
   const st = dashboardStats(jobs, [{ id: A, name: '가' }, { id: B, name: '나' }]);
+  const stWithIdle = dashboardStats(jobs, [{ id: A, name: '가' }, { id: B, name: '나' }, { id: 'zzz', name: '신입' }]);
+  assert.ok(stWithIdle.perPerson.some(p => p.name === '신입'), '일이 없는 신규 가입자도 표에 나와야 한다');
   assert.equal(st.waiting, 4);
   assert.equal(st.in_progress, 1);
   assert.equal(st.done, 1);
   assert.equal(st.rejected, 1);
   assert.equal(st.overdue, 1);
   assert.equal(st.unassigned, 1);
-  assert.deepEqual(st.perPerson.map(p => p.name), ['가', '나']);   // 가: 3 open, 나: 1 open
+  assert.deepEqual(st.perPerson.map(p => p.name), ['가', '나']);   // 가: 3 open, 나: 1 open (일 없는 사람도 포함된다)
   assert.equal(st.perPerson[0].waiting, 2);
   assert.equal(st.perPerson[1].overdue, 1);
 });
