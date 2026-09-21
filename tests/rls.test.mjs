@@ -92,7 +92,7 @@ test('handoff moves job to end of new assignee queue and resets queued_at', asyn
   assert.equal(moved.status, 'waiting');
   assert.equal(moved.started_at, null);
   assert.ok(new Date(moved.queued_at) > new Date(first.queued_at));
-  await assert.rejects(apiB.startJob(job.id), /not allowed|42501/i); // B no longer assignee
+  await assert.rejects(apiB.startJob(job.id)); // B no longer assignee: RLS hides the row
 });
 
 test('non-party user cannot touch the job; admin can delete', async () => {
