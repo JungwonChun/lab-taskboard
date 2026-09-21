@@ -15,7 +15,7 @@ function ext(name) {
 }
 
 export function createApi(client) {
-  const uid = async () => (await client.auth.getUser()).data.user?.id ?? null;
+  const uid = async () => (await client.auth.getSession()).data.session?.user?.id ?? null;
 
   async function updateJob(id, patch) {
     const res = await client.from('jobs').update(patch).eq('id', id).select().maybeSingle();
@@ -99,7 +99,10 @@ export function createApi(client) {
         job_id, kind, storage_path, filename: file.name, size_bytes: file.size, uploader_id: await uid(),
       }).select().single();
       if (res.error) {
-        await client.storage.from('attachments').remove([storage_path]);
+        const rm = await client.storage.from('attachments').remove([storage_path]);
+        if (rm.error || !rm.data?.length) {
+          throw new Error(`첨부 기록: ${res.error.message} (업로드된 파일 정리 실패: ${rm.error?.message || '권한 없음'})`);
+        }
         throw new Error(`첨부 기록: ${res.error.message}`);
       }
       return res.data;
