@@ -118,11 +118,10 @@ function applyProjectFilter(jobs, state) {
 // 대시보드: 개수를 읽는 화면이라 차트가 아니라 숫자 타일 + 표가 맞는 형태다.
 export function renderDashboard(state) {
   const st = dashboardStats(state.jobs, state.profiles);
-  const tile = (label, value, note, kind) => `
-    <div class="tile ${kind || ''}">
+  const tile = (label, value) => `
+    <div class="tile">
       <div class="tile-value">${value}</div>
       <div class="tile-label">${esc(label)}</div>
-      ${note ? `<div class="tile-note">${esc(note)}</div>` : ''}
     </div>`;
   const rows = st.perPerson.map((r) => `
     <tr class="${r.id ? '' : 'orphan'}">
@@ -135,9 +134,9 @@ export function renderDashboard(state) {
   return `
   <div class="head-row"><h2>대시보드</h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>
   <div class="tiles">
-    ${tile('쌓여있는 일', st.waiting, '아직 손대지 않은 대기 건')}
-    ${tile('진행중', st.in_progress, '지금 누군가 붙잡고 있는 일')}
-    ${tile('총 처리량', st.done, '지금까지 완료된 누적 건수')}
+    ${tile('쌓여있는 일', st.waiting)}
+    ${tile('진행중', st.in_progress)}
+    ${tile('총 처리량', st.done)}
   </div>
   <h2>사람별 현황</h2>
   ${rows ? `<div class="table-wrap"><table class="stats">
