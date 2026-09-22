@@ -104,6 +104,15 @@ export function displayName(profileId, profiles) {
   return p ? p.name : '탈퇴자';
 }
 
+// 주어진 의뢰 묶음의 상태별 건수. 대시보드의 '내 태스크'와 '연구실 전체'가 같은 셈법을 쓴다.
+export function statusCounts(jobs) {
+  return {
+    waiting: jobs.filter((j) => j.status === 'waiting').length,
+    in_progress: jobs.filter((j) => j.status === 'in_progress').length,
+    done: jobs.filter((j) => j.status === 'done').length,
+  };
+}
+
 // ───────── 대시보드 집계 ─────────
 // 큐에 쌓인 일(대기), 손에 잡은 일(진행중), 끝낸 일(완료) 세 가지가 핵심 숫자다.
 export function dashboardStats(jobs, profiles) {

@@ -1,4 +1,4 @@
-import { displayName, URGENCY_EMOJI, STATUS_LABELS, sortQueue, sortPast, queuePosition, isOpen, isOverdue, formatDateTime, formatShort, dashboardStats, UNCATEGORIZED_ID } from './lib.js';
+import { statusCounts, displayName, URGENCY_EMOJI, STATUS_LABELS, sortQueue, sortPast, queuePosition, isOpen, isOverdue, formatDateTime, formatShort, dashboardStats, UNCATEGORIZED_ID } from './lib.js';
 
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -118,8 +118,9 @@ function applyProjectFilter(jobs, state) {
 // 대시보드: 개수를 읽는 화면이라 차트가 아니라 숫자 타일 + 표가 맞는 형태다.
 export function renderDashboard(state) {
   const st = dashboardStats(state.jobs, state.profiles);
-  const tile = (label, value) => `
-    <div class="tile">
+  const mine = statusCounts(state.jobs.filter((j) => j.assignee_id === state.me.id));
+  const tile = (label, value, kind = '') => `
+    <div class="tile ${kind}">
       <div class="tile-value">${value}</div>
       <div class="tile-label">${esc(label)}</div>
     </div>`;
@@ -133,6 +134,13 @@ export function renderDashboard(state) {
     </tr>`).join('');
   return `
   <div class="head-row"><h2>대시보드</h2><button class="primary" data-action="new-job">+ 새 의뢰</button></div>
+  <h3 class="dash-head mine-head">나에게 할당된 태스크</h3>
+  <div class="tiles">
+    ${tile('쌓여있는 일', mine.waiting, 'mine')}
+    ${tile('진행중', mine.in_progress, 'mine')}
+    ${tile('총 처리량', mine.done, 'mine')}
+  </div>
+  <h3 class="dash-head">연구실 전체</h3>
   <div class="tiles">
     ${tile('쌓여있는 일', st.waiting)}
     ${tile('진행중', st.in_progress)}
@@ -213,7 +221,7 @@ export function renderJobDetail(state, job, urls = {}) {
   const manage = [];
   if ((isReq || isAdmin) && job.status === 'waiting') manage.push('<button data-action="job-edit">내용 수정</button>', '<button class="danger" data-action="job-cancel">의뢰 취소</button>');
   if (canStatus) manage.push('<button data-action="job-eta">예상 마무리 시간</button>', '<button data-action="job-handoff">담당자 넘기기</button>');
-  if (isAdmin) manage.push('<button class="danger" data-action="job-delete">삭제</button>');
+  if (isReq || isAsg || isAdmin) manage.push('<button class="danger" data-action="job-delete">삭제</button>');
 
   return `
   <button class="close" data-action="close-modal">✕</button>

@@ -234,7 +234,9 @@ create policy jobs_insert on public.jobs for insert to authenticated with check 
 create policy jobs_update on public.jobs for update to authenticated
   using (public.is_admin() or auth.uid() in (requester_id, assignee_id))
   with check (true); -- field/transition rules live in jobs_before_update()
-create policy jobs_delete on public.jobs for delete to authenticated using (public.is_admin());
+-- 삭제는 의뢰한 사람, 맡은 사람, 관리자.
+create policy jobs_delete on public.jobs for delete to authenticated
+  using (public.is_admin() or auth.uid() in (requester_id, assignee_id));
 
 drop policy if exists attachments_select on public.attachments;
 drop policy if exists attachments_insert on public.attachments;

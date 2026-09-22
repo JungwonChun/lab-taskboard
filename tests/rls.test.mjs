@@ -227,6 +227,22 @@ test('a normal user cannot self-promote via profiles update (no update policy)',
   assert.equal(after.data.is_admin, false);
 });
 
+test('의뢰는 의뢰자·담당자·관리자가 지울 수 있고, 무관한 사람은 못 지운다', async () => {
+  const { A, B, apiA, apiB } = await pair();
+  const X = await newUser(uniq('무관'));
+  created.push(X.user.id);
+  const apiX = createApi(X.client);
+
+  const j1 = await apiA.createJob({ assignee_id: B.user.id, title: '의뢰자삭제' });
+  await assert.rejects(apiX.deleteJob(j1.id));                 // 제3자는 불가
+  await apiA.deleteJob(j1.id);                                  // 의뢰자 가능
+  assert.equal((await admin().from('jobs').select('id').eq('id', j1.id)).data.length, 0);
+
+  const j2 = await apiA.createJob({ assignee_id: B.user.id, title: '담당자삭제' });
+  await apiB.deleteJob(j2.id);                                  // 담당자 가능
+  assert.equal((await admin().from('jobs').select('id').eq('id', j2.id)).data.length, 0);
+});
+
 test('의뢰가 딸린 계정을 지워도 연쇄 갱신이 트리거에 막히지 않는다', async () => {
   // SQL 편집기·service_role 은 auth.uid() 가 없다. 이 경로로 계정을 지우면
   // jobs.requester_id 가 ON DELETE SET NULL 로 갱신되는데, 예전에는 그 갱신을

@@ -112,3 +112,10 @@ table.stats td button { padding: 3px 10px; font-size: 12px; }
 .head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .head-row h2 { margin: 18px 0 8px; }
 table.stats tr.orphan td:first-child { color: var(--muted); font-style: italic; }
+
+/* 대시보드 구역 제목 */
+.dash-head { font-size: 13px; font-weight: 700; color: var(--muted); margin: 18px 0 6px; letter-spacing: .02em; }
+.dash-head.mine-head { color: #1d4ed8; }
+/* 내 태스크 타일은 연한 파랑으로 구분한다 (배경만 다르고 글자는 본문색 그대로) */
+.tile.mine { background: #eff6ff; border-color: #bfdbfe; }
+.tile.mine .tile-label { color: #1e40af; }
